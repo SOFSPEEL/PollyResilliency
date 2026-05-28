@@ -14,13 +14,14 @@ public static class ApiResiliencePolicies
     public static ResiliencePipeline<HttpResponseMessage> Create(
         Action<string> log,
         Action<CircuitBreakerVisualState>? circuitStateChanged = null,
-        ApiResiliencePolicyOptions? options = null)
+        ApiResiliencePolicyOptions? options = null,
+        Action<(int StatusCode, int AttemptNumber, TimeSpan Delay)>? retryBackoffObserved = null)
     {
         options ??= new ApiResiliencePolicyOptions();
 
         return new ResiliencePipelineBuilder<HttpResponseMessage>()
             .AddFallback(CreateFallbackForUnavailableServer(log))
-            .AddRetry(CreateExponentialBackoffRetryFor529(log, options))
+            .AddRetry(CreateExponentialBackoffRetryFor529(log, options, retryBackoffObserved))
             .AddCircuitBreaker(CreateCircuitBreakerForRepeatedFailures(log, circuitStateChanged, options))
             .Build();
     }
@@ -50,7 +51,8 @@ public static class ApiResiliencePolicies
 
     private static RetryStrategyOptions<HttpResponseMessage> CreateExponentialBackoffRetryFor529(
         Action<string> log,
-        ApiResiliencePolicyOptions options) =>
+        ApiResiliencePolicyOptions options,
+        Action<(int StatusCode, int AttemptNumber, TimeSpan Delay)>? retryBackoffObserved) =>
         new()
         {
             MaxRetryAttempts = options.MaxRetryAttempts,
@@ -61,6 +63,11 @@ public static class ApiResiliencePolicies
                 .HandleResult(response => (int)response.StatusCode == 529),
             OnRetry = args =>
             {
+                if (args.Outcome.Result is not null)
+                {
+                    retryBackoffObserved?.Invoke(((int)args.Outcome.Result.StatusCode, args.AttemptNumber + 1, args.RetryDelay));
+                }
+
                 log(
                     $"EXPONENTIAL BACKOFF: retry {args.AttemptNumber + 1} after {Describe(args.Outcome)}; waiting {args.RetryDelay.TotalMilliseconds:N0} ms so we are not hammering the server.");
                 return default;
@@ -73,9 +80,9 @@ public static class ApiResiliencePolicies
         ApiResiliencePolicyOptions options) =>
         new()
         {
-            FailureRatio = 1.0,
-            MinimumThroughput = 4,
-            SamplingDuration = TimeSpan.FromSeconds(10),
+            FailureRatio = options.CircuitFailureRatio,
+            MinimumThroughput = options.CircuitMinimumThroughput,
+            SamplingDuration = options.SamplingDuration,
             BreakDuration = options.BreakDuration,
             ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
                 .HandleResult(response => (int)response.StatusCode == 529),
@@ -110,7 +117,12 @@ public static class ApiResiliencePolicies
             return outcome.Exception.GetType().Name;
         }
 
-        return $"HTTP {(int)outcome.Result!.StatusCode} {outcome.Result.StatusCode}";
+        if (outcome.Result is not null)
+        {
+            return $"HTTP {(int)outcome.Result.StatusCode} {outcome.Result.StatusCode}";
+        }
+
+        return "No response";
     }
 
     private static void LogCircuitState(Action<string> log, CircuitBreakerVisualState state)

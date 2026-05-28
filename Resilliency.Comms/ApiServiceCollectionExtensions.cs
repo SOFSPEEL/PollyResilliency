@@ -11,12 +11,17 @@ public static class ApiServiceCollectionExtensions
         Action<string> log,
         Action<CircuitBreakerVisualState>? circuitStateChanged = null,
         ServiceLifetime pipelineLifetime = ServiceLifetime.Singleton,
-        ApiResiliencePolicyOptions? options = null)
+        ApiResiliencePolicyOptions? options = null,
+        Action<(int StatusCode, int AttemptNumber, TimeSpan Delay)>? retryBackoffObserved = null)
     {
         services.Add(
             new ServiceDescriptor(
                 typeof(Polly.ResiliencePipeline<HttpResponseMessage>),
-                _ => ApiResiliencePolicies.Create(log, circuitStateChanged, options),
+                _ => ApiResiliencePolicies.Create(
+                    log,
+                    circuitStateChanged,
+                    options,
+                    retryBackoffObserved),
                 pipelineLifetime));
         services
             .AddRefitClient<IStatusCodeApi>()

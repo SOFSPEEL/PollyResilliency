@@ -10,9 +10,13 @@ var baseAddress = new Uri($"http://localhost:{port}");
 var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.UseUrls(baseAddress.ToString());
 
-var events = new DemoEventHub();
+var events = new UiStateHub();
+events.SetCircuitState(CircuitState.Closed);
 var demoPolicyOptions = new ApiResiliencePolicyOptions
 {
+    CircuitFailureRatio = 0.75,
+    MaxRetryAttempts = 2,
+    CircuitMinimumThroughput = 3,
     RetryDelay = TimeSpan.FromSeconds(1),
     BreakDuration = TimeSpan.FromSeconds(8)
 };
@@ -26,11 +30,19 @@ builder.Services.AddStatusCodeApiComms(
     {
         var line = $"{DateTimeOffset.Now:HH:mm:ss.fff} | {message}";
         Console.WriteLine(line);
-        events.Publish("log", line);
+        events.AddLog(message);
     },
-    state => events.Publish("state", $"Circuit is {state}", state.ToString()),
+    state =>
+    {
+        events.SetCircuitState(MapCircuitState(state));
+    },
     ServiceLifetime.Transient,
-    demoPolicyOptions);
+    demoPolicyOptions,
+    retryBackoffObserved: backoff =>
+    {
+        events.MarkNextCallAsRetry(backoff.AttemptNumber);
+        events.AddRetryBackoff(backoff.StatusCode, (int)Math.Round(backoff.Delay.TotalMilliseconds));
+    });
 
 var app = builder.Build();
 
@@ -76,3 +88,13 @@ static void TryOpenBrowser(Uri uri)
         Console.WriteLine($"Open {uri} in a browser to view the demo.");
     }
 }
+
+static CircuitState MapCircuitState(CircuitBreakerVisualState state) =>
+    state switch
+    {
+        CircuitBreakerVisualState.Closed => CircuitState.Closed,
+        CircuitBreakerVisualState.Open => CircuitState.Open,
+        CircuitBreakerVisualState.HalfOpen => CircuitState.HalfOpen,
+        _ => throw new ArgumentOutOfRangeException(nameof(state), state, null)
+    };
+

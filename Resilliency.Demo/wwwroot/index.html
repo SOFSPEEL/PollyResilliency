@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Polly Circuit Breaker Demo</title>
-    <link rel="stylesheet" href="/styles.css?v=29">
+    <link rel="stylesheet" href="/styles.css?v=35">
 </head>
 <body class="closed">
 <header>
@@ -13,11 +13,8 @@
 </header>
 <main>
     <section class="stage">
-        <aside class="storyboard">
-            <h2 class="story-title">Storyboard</h2>
-            <div id="storyList"></div>
-        </aside>
         <div class="diagram">
+            <div class="diagram-left">
             <div class="circuit-area">
                 <div class="node">
                     <div class="node-title">CALLING<br>SERVER</div>
@@ -36,67 +33,52 @@
                 <div class="node">
                     <div>
                         <div class="node-title">RESPONDING<br>SERVER</div>
-                        <div class="node-status" id="apiStatus">READY</div>
+                        <div class="node-status" id="apiStatus">HTTP ---</div>
                     </div>
                 </div>
             </div>
             <div class="diagram-bottom">
-                <div class="call-graph" aria-label="Backoff delay by call count">
-                    <div class="graph-title">Backoff Delay Over Time</div>
-                    <div class="graph-subtitle">X = calls made, height = retry wait; green/red bars show HTTP results</div>
-                    <div class="backoff-time-chart">
-                        <div class="backoff-y-axis"><span>9s</span><span>3s</span><span>0s</span></div>
-                        <div class="backoff-time-plot" id="backoffBars">
-                            <div class="backoff-empty">Bars appear as calls and retry waits happen</div>
+                    <div class="call-graph" aria-label="Backoff delay by call count">
+                        <div class="graph-title">Backoff Delay Over Time</div>
+                        <div class="graph-subtitle">X = calls made, height = retry wait; green/red bars show HTTP results</div>
+                        <div class="backoff-time-chart">
+                            <div class="backoff-y-axis"><span>9s</span><span>3s</span><span>0s</span></div>
+                            <div class="backoff-time-plot" id="backoffBars">
+                                <div class="backoff-empty">Bars appear as calls and retry waits happen</div>
+                            </div>
                         </div>
+                        <div class="timeline-axis" id="graphAxis"></div>
                     </div>
-                    <div class="timeline-axis" id="graphAxis"></div>
-                </div>
-                <div class="status-legend" aria-label="HTTP status legend">
-                    <div class="legend-item"><span class="legend-code success">200</span><span>Healthy response</span></div>
-                    <div class="legend-item"><span class="legend-code warning">529</span><span>Overloaded, retry with backoff</span></div>
-                    <div class="legend-item"><span class="legend-code error">404</span><span>Not found, fallback apology</span></div>
-                    <div class="legend-item"><span class="legend-code down">DOWN</span><span>No server connection</span></div>
+                    <div class="status-legend" aria-label="HTTP status legend">
+                        <div class="legend-item"><span class="legend-code success">200</span><span>Healthy response</span></div>
+                        <div class="legend-item"><span class="legend-code warning">529</span><span>Overloaded, retry with backoff</span></div>
+                        <div class="legend-item"><span class="legend-code error">404</span><span>Not found, fallback apology</span></div>
+                        <div class="legend-item"><span class="legend-code down">DOWN</span><span>No server connection</span></div>
+                    </div>
                 </div>
             </div>
+            <aside class="run-log" aria-label="Demo run log">
+                <div class="run-log-title">Run Log</div>
+                <div class="run-log-list" id="runLog"></div>
+            </aside>
         </div>
     </section>
 </main>
 <script>
     const apiStatus = document.getElementById('apiStatus');
     const flowStatus = document.getElementById('flowStatus');
-    const storyList = document.getElementById('storyList');
     const backoffBars = document.getElementById('backoffBars');
     const graphAxis = document.getElementById('graphAxis');
+    const runLog = document.getElementById('runLog');
     const totalCallSlots = 10;
     let httpFlashTimer;
     let callCount = 0;
     let lastRetryCallNumber = 0;
-
-    function addLog(message) {
-        const text = message.split('|').pop().trim();
-        inferFlowFromLog(text);
-    }
-
-    function addStory(key, message) {
-        let item = storyList.querySelector(`[data-step="${key}"]`);
-        if (!item) {
-            item = document.createElement('div');
-            item.className = 'story-step';
-            item.dataset.step = key;
-            item.textContent = message;
-            storyList.appendChild(item);
-        } else {
-            item.textContent = message;
-        }
-
-        storyList.querySelectorAll('.story-step').forEach(row => row.classList.toggle('active', row === item));
-        item.scrollIntoView({block: 'nearest'});
-    }
+    let previousGraphCount = 0;
+    let previousBackoffCount = 0;
 
     function setFlow(mode, text) {
         flowStatus.textContent = text;
-        document.body.classList.toggle('http-active', mode === 'calling' || mode === 'probe');
     }
 
     function flashHttpRequest(text) {
@@ -130,6 +112,10 @@
     }
 
     function addBackoffBar(delayText, statusCode) {
+        addBackoffBarAtCall(delayText, statusCode, lastRetryCallNumber);
+    }
+
+    function addBackoffBarAtCall(delayText, statusCode, callNumber) {
         const milliseconds = Number(delayText.replace(/,/g, ''));
         if (!Number.isFinite(milliseconds)) return;
 
@@ -138,10 +124,10 @@
         const seconds = milliseconds / 1000;
         const bar = document.createElement('div');
         bar.className = 'backoff-bar';
-        bar.style.setProperty('--bar-left', getCallLeft(lastRetryCallNumber));
+        bar.style.setProperty('--bar-left', getCallLeft(callNumber));
         bar.style.setProperty('--bar-height', `${Math.min(100, (seconds / 9) * 100)}%`);
         bar.innerHTML = `<strong>${statusCode ?? '529'}</strong>`;
-        bar.title = `HTTP ${statusCode ?? '529'} retry waits ${formatSeconds(seconds)} after call ${lastRetryCallNumber}`;
+        bar.title = `HTTP ${statusCode ?? '529'} retry waits ${formatSeconds(seconds)} after call ${callNumber}`;
         backoffBars.appendChild(bar);
     }
 
@@ -162,124 +148,163 @@
         return `${seconds.toLocaleString(undefined, {maximumFractionDigits: 1})}s`;
     }
 
-    function inferFlowFromLog(text) {
-        if (text.includes('healthy HTTP 200 call number 1')) {
-            addStory('healthy-1', 'Healthy call 1: closed circuit sends HTTP 200 to STATUS API.');
-            setFlow('calling', 'Healthy call 1: HTTP 200');
-            return;
+    function applyCircuitState(state, canSendHttp) {
+        const normalized = normalizeCircuitState(state);
+        if (!normalized) return;
+        setState(normalized);
+
+        if (normalized === 'Closed') {
+            setFlow('idle', canSendHttp === false ? 'Circuit closed (HTTP blocked)' : 'Circuit closed (HTTP allowed)');
+        } else if (normalized === 'Open') {
+            setFlow('blocked', 'Circuit open');
+        } else if (normalized === 'HalfOpen') {
+            setFlow('probe', canSendHttp === false ? 'Half-open (HTTP blocked)' : 'Half-open probe (HTTP allowed)');
+        }
+    }
+
+    function normalizeCircuitState(state) {
+        if (state === null || state === undefined) return null;
+        if (typeof state === 'number') {
+            if (state === 0) return 'Closed';
+            if (state === 1) return 'Open';
+            if (state === 2) return 'HalfOpen';
+            return null;
         }
 
-        if (text.includes('healthy call 1 returned')) {
-            addStory('healthy-1', 'Healthy call 1 succeeded with HTTP 200.');
-            setFlow('idle', 'Healthy call 1 succeeded');
-            return;
+        return state;
+    }
+
+    function applyUiStateChanged(data) {
+        applyCircuitState(data.CircuitState, data.SendingHttp);
+
+        if (Number.isFinite(data.ApiStatusCode)) {
+            setApiStatus(data.ApiStatusCode);
+        } else {
+            setApiStatus(null);
         }
 
-        if (text.includes('healthy HTTP 200 call number 2')) {
-            addStory('healthy-2', 'Healthy call 2: circuit is still closed and traffic flows normally.');
-            setFlow('calling', 'Healthy call 2: HTTP 200');
-            return;
-        }
+        renderGraphState(data.GraphEntries ?? data.graphEntries ?? [], data.BackoffEntries ?? data.backoffEntries ?? []);
+        renderRunLog(data.LogEntries ?? data.logEntries ?? []);
 
-        if (text.includes('healthy call 2 returned')) {
-            addStory('healthy-2', 'Healthy call 2 succeeded with HTTP 200.');
-            setFlow('idle', 'Healthy call 2 succeeded');
-            return;
-        }
-
-        if (text.includes('send HTTP 529')) {
-            addStory('529', 'HTTP 529 returned from the API. Polly starts exponential backoff.');
-            setFlow('calling', 'Calling API: HTTP 529');
-            return;
-        }
-
-        if (text.includes('EXPONENTIAL BACKOFF')) {
-            const wait = text.match(/waiting ([0-9,]+) ms/);
-            const status = text.match(/HTTP ([0-9]+)/)?.[1];
-            const delay = wait ? formatSeconds(Number(wait[1].replace(/,/g, '')) / 1000) : 'before retry';
-            if (wait) addBackoffBar(wait[1], status);
-            addStory(`backoff-${delay}`, `Backoff waits ${delay} so we are not hammering the server.`);
-            setFlow('backoff', `Backoff ${delay}: not hammering`);
-            return;
-        }
-
-        if (text.includes('API SERVER: received')) {
+        if ((data.GraphEntries?.length ?? 0) > previousGraphCount) {
+            const latest = data.GraphEntries[data.GraphEntries.length - 1];
+            setFlow('calling', `Calling API: HTTP ${latest.StatusCode}`);
             flashHttpRequest('HTTP request reached STATUS API');
-            return;
         }
 
-        if (text.includes('request HTTP 200 while open') || text.includes('blocked by open circuit')) {
-            addStory('blocked', 'Open circuit blocks the next call locally before HTTP.');
-            setFlow('blocked', 'Blocked locally before HTTP');
-            return;
+        if ((data.BackoffEntries?.length ?? 0) > previousBackoffCount) {
+            setFlow('backoff', 'Backing off before retry');
         }
 
-        if (text.includes('half-open probe') || text.includes('show half-open')) {
-            addStory('halfopen', 'Circuit moves half-open and allows one probe request.');
-            setFlow('probe', 'Half-open probe request');
-            return;
-        }
+        previousGraphCount = data.GraphEntries?.length ?? 0;
+        previousBackoffCount = data.BackoffEntries?.length ?? 0;
 
-        if (text.includes('recovery response')) {
-            addStory('recovered', 'Probe succeeds with HTTP 200 and the circuit closes.');
-            setFlow('idle', 'Recovered');
-            return;
+        if (data.FallbackMessage) {
+            setFallback();
         }
+    }
 
-        if (text.includes('request HTTP 404')) {
-            addStory('404-fallback', 'HTTP 404 cannot be fixed by retry, so Polly uses fallback immediately.');
-            setFlow('fallback', 'HTTP 404: fallback without retry');
-            return;
-        }
+    function renderGraphState(graphEntries, backoffEntries) {
+        resetBackoffGraph();
 
-        if (text.includes('server-down URL')) {
-            addStory('fallback-start', 'Server is down. Polly will use the fallback response.');
-            setFlow('fallback', 'Server down: local fallback');
-            return;
-        }
+        graphEntries.forEach(entry => {
+            const callNumber = Number(entry.CallNumber);
+            const statusCode = Number(entry.StatusCode);
+            const label = entry.Label ?? `HTTP ${statusCode}`;
+            if (!Number.isFinite(callNumber) || !Number.isFinite(statusCode)) return;
 
-        if (text.includes('closed circuit')) {
-            addStory('closed', 'Circuit starts closed, so calls can flow to the API.');
-            return;
-        }
+            callCount = Math.max(callCount, callNumber);
+            addAxisLabel(label, callNumber);
+            if (statusCode === 529) {
+                lastRetryCallNumber = callNumber;
+                return;
+            }
 
-        if (text.includes('open circuit')) {
-            addStory('open', 'Circuit is open: new calls fail fast before HTTP.');
-        }
+            addStatusBar(String(statusCode), label, callNumber);
+        });
+
+        backoffEntries.forEach(entry => {
+            const callNumber = Number(entry.CallNumber);
+            const statusCode = Number(entry.StatusCode);
+            const delayMs = Number(entry.DelayMs);
+            if (!Number.isFinite(callNumber) || !Number.isFinite(statusCode) || !Number.isFinite(delayMs)) return;
+            addBackoffBarAtCall(String(delayMs), String(statusCode), callNumber);
+        });
     }
 
     function setState(next) {
         const css = next.toLowerCase();
         document.body.classList.remove('closed', 'open', 'halfopen', 'fallback');
         document.body.classList.add(css === 'halfopen' ? 'halfopen' : css);
-        document.body.classList.remove('http-active');
         document.body.classList.remove('http-flash');
     }
 
-    function setFallback(message) {
+    function setFallback() {
         document.body.classList.remove('closed', 'open', 'halfopen');
         document.body.classList.add('fallback');
-        document.body.classList.remove('http-active');
         document.body.classList.remove('http-flash');
-        addStory('fallback', `Fallback response returned: ${message}`);
         setFlow('fallback', 'Fallback response returned locally');
     }
 
-    function setApiStatus(status) {
-        apiStatus.textContent = `HTTP ${status}`;
-        apiStatus.classList.remove('ok', 'error');
-        const code = Number(status);
-        apiStatus.classList.add(code >= 500 ? 'error' : 'ok');
+    function getHttpColor(statusCode) {
+        if (statusCode === 200) return 'var(--green)';
+        if (statusCode === 529) return 'var(--amber)';
+        if (statusCode >= 400) return 'var(--red)';
+        return 'var(--blue)';
+    }
+
+    function setApiStatus(statusCode) {
+        if (Number.isFinite(statusCode)) {
+            apiStatus.textContent = `HTTP ${statusCode}`;
+            document.body.style.setProperty('--http-line-color', getHttpColor(statusCode));
+        } else {
+            apiStatus.textContent = 'HTTP ---';
+            document.body.style.removeProperty('--http-line-color');
+        }
+
+        apiStatus.classList.remove('ok', 'warning', 'error');
+        if (!Number.isFinite(statusCode)) {
+            return;
+        }
+
+        if (statusCode === 529) {
+            apiStatus.classList.add('warning');
+            return;
+        }
+
+        apiStatus.classList.add(statusCode >= 400 ? 'error' : 'ok');
+    }
+
+    function renderRunLog(logEntries) {
+        if (!runLog) {
+            return;
+        }
+
+        runLog.replaceChildren();
+        if (!logEntries.length) {
+            const empty = document.createElement('div');
+            empty.className = 'run-log-empty';
+            empty.textContent = 'Run events appear here';
+            runLog.appendChild(empty);
+            return;
+        }
+
+        logEntries.forEach(entry => {
+            const item = document.createElement('div');
+            item.className = 'run-log-item';
+            const timestamp = entry.Timestamp ?? entry.timestamp ?? '--:--:--.---';
+            const message = entry.Message ?? entry.message ?? '';
+            item.textContent = `${timestamp} | ${message}`;
+            runLog.appendChild(item);
+        });
+
+        runLog.scrollTop = runLog.scrollHeight;
     }
 
     const source = new EventSource('/events');
     source.onmessage = event => {
         const data = JSON.parse(event.data);
-        if (data.Type === 'state' && data.State) setState(data.State);
-        if (data.Type === 'api-status' && data.State) setApiStatus(data.State);
-        if (data.Type === 'fallback') setFallback(data.Message);
-        if (data.Type === 'graph-bar' && data.State && data.GraphLabel) addGraphBar(data.State, data.GraphLabel);
-        if (data.Type === 'log') addLog(data.Message);
+        applyUiStateChanged(data);
     };
 
     document.getElementById('run').addEventListener('click', async () => {
@@ -288,13 +313,10 @@
     });
 
     function resetScenarioView() {
-        resetStoryboard();
         resetBackoffGraph();
+        renderRunLog([]);
     }
 
-    function resetStoryboard() {
-        storyList.replaceChildren();
-    }
 
     function resetBackoffGraph() {
         callCount = 0;

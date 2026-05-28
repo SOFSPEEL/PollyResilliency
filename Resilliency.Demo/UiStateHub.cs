@@ -1,0 +1,200 @@
+using System.Collections.Concurrent;
+using System.Threading.Channels;
+
+namespace Resilliency.Demo;
+
+internal sealed class UiStateHub
+{
+    private const int MaxLogEntries = 200;
+
+    private readonly ConcurrentDictionary<Guid, Channel<UiState>> _subscribers = new();
+    private readonly Lock _stateSync = new();
+    private CircuitState _circuitState = CircuitState.Closed;
+    private int? _apiStatusCode;
+    private string? _fallbackMessage;
+    private readonly List<UiGraphEntry> _graphEntries = [];
+    private readonly List<UiBackoffEntry> _backoffEntries = [];
+    private readonly List<UiLogEntry> _logEntries = [];
+    private int _callCount;
+    private int _lastRetryCallNumber;
+    private string? _nextGraphLabel;
+
+    public UiStateSubscription Subscribe()
+    {
+        var id = Guid.NewGuid();
+        var channel = Channel.CreateUnbounded<UiState>();
+        _subscribers[id] = channel;
+        return new UiStateSubscription(channel.Reader, () => _subscribers.TryRemove(id, out _));
+    }
+
+    public void ResetScenario()
+    {
+        lock (_stateSync)
+        {
+            _apiStatusCode = null;
+            _fallbackMessage = null;
+            _graphEntries.Clear();
+            _backoffEntries.Clear();
+            _logEntries.Clear();
+            _logEntries.Add(new UiLogEntry(DateTimeOffset.Now.ToString("HH:mm:ss.fff"), "SCENARIO: reset."));
+            _callCount = 0;
+            _lastRetryCallNumber = 0;
+            _nextGraphLabel = null;
+            PublishUiStateChanged();
+        }
+    }
+
+    public void AddLog(string message)
+    {
+        lock (_stateSync)
+        {
+            _logEntries.Add(new UiLogEntry(DateTimeOffset.Now.ToString("HH:mm:ss.fff"), message));
+            if (_logEntries.Count > MaxLogEntries)
+            {
+                _logEntries.RemoveAt(0);
+            }
+
+            PublishUiStateChanged();
+        }
+    }
+
+    public void SetCircuitState(CircuitState state)
+    {
+        lock (_stateSync)
+        {
+            if (_circuitState == state)
+            {
+                return;
+            }
+
+            _circuitState = state;
+            if (state is CircuitState.HalfOpen or CircuitState.Open)
+            {
+                _nextGraphLabel = FormatCircuitLabel(state);
+            }
+
+            PublishUiStateChanged();
+        }
+    }
+
+    public void SetApiStatus(int statusCode)
+    {
+        lock (_stateSync)
+        {
+            _apiStatusCode = statusCode;
+            PublishUiStateChanged();
+        }
+    }
+
+    public void AddGraphBar(int statusCode)
+    {
+        lock (_stateSync)
+        {
+            _callCount += 1;
+            var label = ResolveGraphLabel(statusCode);
+            _graphEntries.Add(new UiGraphEntry(_callCount, statusCode, label));
+            if (statusCode == 529)
+            {
+                _lastRetryCallNumber = _callCount;
+            }
+
+            PublishUiStateChanged();
+        }
+    }
+
+    public void AddRetryBackoff(int statusCode, int delayMs)
+    {
+        lock (_stateSync)
+        {
+            if (_lastRetryCallNumber <= 0)
+            {
+                return;
+            }
+
+            _backoffEntries.Add(new UiBackoffEntry(_lastRetryCallNumber, statusCode, delayMs));
+            PublishUiStateChanged();
+        }
+    }
+
+    public void MarkNextCallAsRetry(int attemptNumber)
+    {
+        lock (_stateSync)
+        {
+            _nextGraphLabel = $"Retry {attemptNumber}";
+            PublishUiStateChanged();
+        }
+    }
+
+    public void SetFallback(string message, int statusCode)
+    {
+        lock (_stateSync)
+        {
+            _fallbackMessage = message;
+            _apiStatusCode = statusCode;
+            PublishUiStateChanged();
+        }
+    }
+
+    public UiState CreateUiStateSnapshot()
+    {
+        lock (_stateSync)
+        {
+            return CreateUiState();
+        }
+    }
+
+    public void Publish(UiState uiState)
+    {
+        foreach (var subscriber in _subscribers.Values)
+        {
+            subscriber.Writer.TryWrite(uiState);
+        }
+    }
+
+    private void PublishUiStateChanged()
+    {
+        Publish(CreateUiState());
+    }
+
+    private string ResolveGraphLabel(int statusCode)
+    {
+        if (!string.IsNullOrWhiteSpace(_nextGraphLabel))
+        {
+            var nextLabel = _nextGraphLabel;
+            _nextGraphLabel = null;
+            return nextLabel;
+        }
+
+        if (statusCode == 200)
+        {
+            return "Healthy";
+        }
+
+        if (statusCode == 529)
+        {
+            return FormatCircuitLabel(_circuitState);
+        }
+
+        return FormatCircuitLabel(_circuitState);
+    }
+
+    private static string FormatCircuitLabel(CircuitState state) =>
+        state switch
+        {
+            CircuitState.Closed => "Closed",
+            CircuitState.Open => "Open",
+            CircuitState.HalfOpen => "Half-Open",
+            _ => state.ToString()
+        };
+
+    private UiState CreateUiState() =>
+        new(
+            CircuitState: _circuitState,
+            SendingHttp: _circuitState is CircuitState.Closed or CircuitState.HalfOpen,
+            ApiStatusCode: _apiStatusCode,
+            FallbackMessage: _fallbackMessage,
+            GraphEntries: _graphEntries.ToArray(),
+            BackoffEntries: _backoffEntries.ToArray(),
+            LogEntries: _logEntries.ToArray());
+}
+

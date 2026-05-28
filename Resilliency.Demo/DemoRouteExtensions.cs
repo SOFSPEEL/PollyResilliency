@@ -12,14 +12,14 @@ internal static class DemoRouteExtensions
         app.MapGet("/status/{statusCode:int}", StatusCodeAsync);
     }
 
-    private static async Task StreamEventsAsync(HttpContext context, DemoEventHub eventHub)
+    private static async Task StreamEventsAsync(HttpContext context, UiStateHub eventHub)
     {
         context.Response.Headers.CacheControl = "no-cache";
         context.Response.Headers.Connection = "keep-alive";
         context.Response.ContentType = "text/event-stream";
 
         var subscription = eventHub.Subscribe();
-        await WriteEventAsync(context, new DemoEvent("state", "Circuit starts closed", "Closed"));
+        await WriteEventAsync(context, eventHub.CreateUiStateSnapshot());
 
         try
         {
@@ -36,16 +36,22 @@ internal static class DemoRouteExtensions
 
     private static async Task<IResult> RunScenarioAsync(
         DemoScenarioRunner runner,
+        UiStateHub eventHub,
         CancellationToken cancellationToken)
     {
         var started = await runner.TryRunAsync(cancellationToken);
+        eventHub.AddLog(started ? "SCENARIO: run requested." : "SCENARIO: run already in progress.");
         return Results.Accepted(value: new { status = started ? "started" : "already-running" });
     }
 
     private static async Task<IResult> RestartScenarioAsync(
         DemoScenarioRunner runner,
+        UiStateHub eventHub,
         CancellationToken cancellationToken)
     {
+        eventHub.ResetScenario();
+        eventHub.SetCircuitState(CircuitState.Closed);
+        eventHub.AddLog("SCENARIO: restart requested.");
         await runner.RestartAsync(cancellationToken);
         return Results.Accepted(value: new { status = "restarted" });
     }
@@ -53,19 +59,15 @@ internal static class DemoRouteExtensions
     private static async Task<IResult> StatusCodeAsync(
         int statusCode,
         int delayMs,
-        DemoEventHub eventHub,
+        UiStateHub eventHub,
         HttpContext context)
     {
         var line =
             $"{DateTimeOffset.Now:HH:mm:ss.fff} | API SERVER: received GET {context.Request.Path}{context.Request.QueryString}; returning HTTP {statusCode} after {delayMs} ms.";
         Console.WriteLine(line);
-        eventHub.Publish("log", line);
-        eventHub.Publish("api-status", $"HTTP {statusCode}", statusCode.ToString());
-        eventHub.Publish(new DemoEvent(
-            Type: "graph-bar",
-            Message: statusCode.ToString(),
-            State: statusCode.ToString(),
-            GraphLabel: GetGraphLabel(statusCode)));
+        eventHub.AddLog($"API SERVER: HTTP {statusCode} ({delayMs} ms delay)");
+        eventHub.SetApiStatus(statusCode);
+        eventHub.AddGraphBar(statusCode);
 
         if (delayMs > 0)
         {
@@ -75,18 +77,10 @@ internal static class DemoRouteExtensions
         return Results.Text($"HTTP {statusCode}", statusCode: statusCode);
     }
 
-    private static string GetGraphLabel(int statusCode) =>
-        statusCode switch
-        {
-            StatusCodes.Status200OK => "Healthy",
-            529 => "BackingOff",
-            StatusCodes.Status404NotFound => "No Retries",
-            _ => $"HTTP {statusCode}"
-        };
 
-    private static async Task WriteEventAsync(HttpContext context, DemoEvent demoEvent)
+    private static async Task WriteEventAsync(HttpContext context, UiState uiState)
     {
-        var json = JsonSerializer.Serialize(demoEvent);
+        var json = JsonSerializer.Serialize(uiState);
         await context.Response.WriteAsync($"data: {json}\n\n");
         await context.Response.Body.FlushAsync();
     }
