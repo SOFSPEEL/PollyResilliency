@@ -7,6 +7,4 @@ public sealed class ApiResiliencePolicyOptions
     public TimeSpan RetryDelay { get; init; } = TimeSpan.FromMilliseconds(250);
 
     public TimeSpan BreakDuration { get; init; } = TimeSpan.FromSeconds(2);
-
-    public TimeSpan Timeout { get; init; } = TimeSpan.FromMilliseconds(250);
 }

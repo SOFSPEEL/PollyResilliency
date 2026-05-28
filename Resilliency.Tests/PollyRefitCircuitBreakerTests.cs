@@ -3,7 +3,6 @@ using System.Net.Sockets;
 using Microsoft.Extensions.DependencyInjection;
 using Polly;
 using Polly.CircuitBreaker;
-using Polly.Timeout;
 using Resilliency.Comms;
 
 namespace Resilliency.Tests;
@@ -11,7 +10,7 @@ namespace Resilliency.Tests;
 public class PollyRefitCircuitBreakerTests
 {
     [Test]
-    public async Task Polly_pipeline_chains_timeout_circuit_breaker_and_retry_around_refit_call()
+    public async Task Polly_pipeline_chains_circuit_breaker_retry_and_fallback_around_refit_call()
     {
         await using var server = await LocalStatusCodeServer.StartAsync();
         await using var serviceProvider = CreateServiceProvider(server.BaseAddress);
@@ -43,15 +42,7 @@ public class PollyRefitCircuitBreakerTests
 
         Log($"RESULT: recovery response was {(int)recoveredResponse.StatusCode} {recoveredResponse.StatusCode}.");
 
-        Log("SCENARIO 4: call /status/200 with a server delay longer than the timeout; Polly times out and retries.");
-        var timedOut = Assert.ThrowsAsync<TimeoutRejectedException>(async () =>
-            await pipeline.ExecuteAsync(
-                cancellationToken => new ValueTask<HttpResponseMessage>(api.GetStatusAsync(200, delayMs: 1_000, cancellationToken)),
-                TestContext.CurrentContext.CancellationToken));
-
-        Log($"RESULT: timed out after retries: {timedOut!.GetType().Name}.");
-
-        Log("SCENARIO 5: call a server-down URL; fallback returns the customer apology message.");
+        Log("SCENARIO 4: call a server-down URL; fallback returns the customer apology message.");
         await using var serverDownProvider = CreateServiceProvider(new Uri($"http://127.0.0.1:{GetAvailablePort()}/"));
         var serverDownApi = serverDownProvider.GetRequiredService<IStatusCodeApi>();
         var serverDownPipeline = serverDownProvider.GetRequiredService<ResiliencePipeline<HttpResponseMessage>>();
@@ -68,6 +59,7 @@ public class PollyRefitCircuitBreakerTests
             Assert.That(recoveredResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
             Assert.That(fallbackResponse.StatusCode, Is.EqualTo(HttpStatusCode.ServiceUnavailable));
             Assert.That(fallbackMessage, Is.EqualTo(ApiResiliencePolicies.ServerUnavailableFallbackMessage));
+            Assert.That(server.RequestCount, Is.EqualTo(5));
         });
     }
 
@@ -105,6 +97,7 @@ public class PollyRefitCircuitBreakerTests
         private readonly CancellationTokenSource _shutdown = new();
         private readonly HttpListener _listener = new();
         private readonly Task _serverTask;
+        private int _requestCount;
 
         private LocalStatusCodeServer(Uri baseAddress)
         {
@@ -115,6 +108,8 @@ public class PollyRefitCircuitBreakerTests
         }
 
         public Uri BaseAddress { get; }
+
+        public int RequestCount => _requestCount;
 
         public static Task<LocalStatusCodeServer> StartAsync()
         {
@@ -166,6 +161,7 @@ public class PollyRefitCircuitBreakerTests
         {
             var request = context.Request;
             var response = context.Response;
+            Interlocked.Increment(ref _requestCount);
 
             var statusCodeText = request.Url?.Segments.LastOrDefault();
             var statusCode = int.TryParse(statusCodeText, out var parsedStatusCode)

@@ -1,6 +1,5 @@
 using Polly;
 using Polly.CircuitBreaker;
-using Polly.Timeout;
 using Refit;
 using Resilliency.Comms;
 
@@ -122,21 +121,7 @@ internal sealed class DemoScenarioRunner(
         events.Publish("log", $"{DateTimeOffset.Now:HH:mm:ss.fff} | RESULT: recovery response was {(int)recoveredResponse.StatusCode} {recoveredResponse.StatusCode}.");
         await PauseForVisualStateAsync("PAUSE: circuit is closed again after the successful probe.", TimeSpan.FromSeconds(5), cancellationToken);
 
-        events.Publish("log", $"{DateTimeOffset.Now:HH:mm:ss.fff} | SCENARIO 4: slow HTTP 200 exceeds timeout; retry attempts it again.");
-        try
-        {
-            await pipeline.ExecuteAsync(
-                token => new ValueTask<HttpResponseMessage>(api.GetStatusAsync(200, delayMs: 2_000, token)),
-                cancellationToken);
-        }
-        catch (TimeoutRejectedException ex)
-        {
-            events.Publish("log", $"{DateTimeOffset.Now:HH:mm:ss.fff} | RESULT: timed out after retries: {ex.GetType().Name}.");
-        }
-
-        await PauseForVisualStateAsync("PAUSE: timeout failures opened the circuit again.", TimeSpan.FromSeconds(5), cancellationToken);
-
-        events.Publish("log", $"{DateTimeOffset.Now:HH:mm:ss.fff} | SCENARIO 5: call a server-down URL; fallback returns the customer apology message.");
+        events.Publish("log", $"{DateTimeOffset.Now:HH:mm:ss.fff} | SCENARIO 4: call a server-down URL; fallback returns the customer apology message.");
         var downApi = RestService.For<IStatusCodeApi>("http://127.0.0.1:1");
         var downPipeline = ApiResiliencePolicies.Create(message =>
         {

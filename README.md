@@ -2,7 +2,6 @@
 
 A small .NET demo showing how to combine Polly and Refit with:
 
-- timeout handling
 - exponential-backoff retry
 - circuit breaker
 - fallback for unavailable downstream APIs
@@ -13,7 +12,7 @@ The solution includes a live demo app plus NUnit tests that exercise the resilie
 
 - `Resilliency.Comms` - reusable resilience pipeline + typed Refit client registration.
 - `Resilliency.Demo` - ASP.NET Core demo app with a browser dashboard and scenario runner.
-- `Resilliency.Tests` - NUnit tests validating timeout, retry, circuit-breaker, and fallback behavior.
+- `Resilliency.Tests` - NUnit tests validating retry, circuit-breaker, and fallback behavior.
 
 ## Prerequisites
 
@@ -74,8 +73,7 @@ services.AddStatusCodeApiComms(
     {
         MaxRetryAttempts = 3,
         RetryDelay = TimeSpan.FromMilliseconds(250),
-        BreakDuration = TimeSpan.FromSeconds(2),
-        Timeout = TimeSpan.FromMilliseconds(250)
+        BreakDuration = TimeSpan.FromSeconds(2)
     });
 ```
 
@@ -83,4 +81,3 @@ services.AddStatusCodeApiComms(
 
 - The fallback response text is defined by `ApiResiliencePolicies.ServerUnavailableFallbackMessage`.
 - The demo intentionally logs each resilience event so the policy transitions are easy to follow.
-

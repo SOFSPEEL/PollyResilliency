@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Polly Circuit Breaker Demo</title>
-    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/styles.css?v=10">
 </head>
 <body class="closed">
 <header>
@@ -131,7 +131,7 @@
         backoffBars.appendChild(bar);
     }
 
-    function addBackoffBar(delayText) {
+    function addBackoffBar(delayText, statusCode) {
         const milliseconds = Number(delayText.replace(/,/g, ''));
         if (!Number.isFinite(milliseconds)) return;
 
@@ -143,8 +143,8 @@
         bar.className = 'backoff-bar';
         bar.style.setProperty('--bar-left', `${Math.min(96, 4 + (elapsedSeconds / 60) * 92)}%`);
         bar.style.setProperty('--bar-height', `${Math.min(100, (seconds / 4) * 100)}%`);
-        bar.innerHTML = `<strong>${seconds.toLocaleString(undefined, {maximumFractionDigits: 1})}s</strong>`;
-        bar.title = `${seconds}s wait at +${elapsedSeconds.toFixed(1)}s: not hammering the server`;
+        bar.innerHTML = `<strong>${statusCode ?? '529'}</strong>`;
+        bar.title = `HTTP ${statusCode ?? '529'} retry waits ${seconds}s at +${elapsedSeconds.toFixed(1)}s`;
         backoffBars.appendChild(bar);
     }
 
@@ -181,8 +181,9 @@
 
         if (text.includes('EXPONENTIAL BACKOFF')) {
             const wait = text.match(/waiting ([0-9,]+) ms/);
+            const status = text.match(/HTTP ([0-9]+)/)?.[1];
             const delay = wait ? `${wait[1]} ms` : 'before retry';
-            if (wait) addBackoffBar(wait[1]);
+            if (wait) addBackoffBar(wait[1], status);
             addStory(`backoff-${delay}`, `Backoff waits ${delay} so we are not hammering the server.`);
             setFlow('backoff', `Backoff ${delay}: not hammering`);
             return;
@@ -208,18 +209,6 @@
         if (text.includes('recovery response')) {
             addStory('recovered', 'Probe succeeds with HTTP 200 and the circuit closes.');
             setFlow('idle', 'Recovered');
-            return;
-        }
-
-        if (text.includes('slow HTTP 200')) {
-            addStory('timeout', 'A slow HTTP 200 call exceeds the timeout window.');
-            setFlow('calling', 'Calling API: slow HTTP 200');
-            return;
-        }
-
-        if (text.includes('TIMEOUT')) {
-            addStory('timeout-retry', 'Timeout triggers exponential backoff before retrying.');
-            setFlow('backoff', 'Timeout: waiting before retry');
             return;
         }
 
@@ -274,21 +263,29 @@
     };
 
     document.getElementById('run').addEventListener('click', async () => {
-        await fetch('/run', {method: 'POST'});
+        resetScenarioView();
+        await fetch('/restart', {method: 'POST'});
     });
 
-    setTimeout(() => {
+    function resetScenarioView() {
+        resetStoryboard();
+        resetBackoffGraph();
+    }
+
+    function resetStoryboard() {
+        storyList.replaceChildren();
+    }
+
+    function resetBackoffGraph() {
         firstHttpCallAt = undefined;
-        backoffBars.querySelectorAll('.backoff-bar').forEach(bar => bar.remove());
+        backoffBars.querySelectorAll('.backoff-bar, .status-bar').forEach(bar => bar.remove());
         if (!backoffBars.querySelector('.backoff-empty')) {
             const empty = document.createElement('div');
             empty.className = 'backoff-empty';
             empty.textContent = 'Bars appear as calls and retry waits happen';
             backoffBars.appendChild(empty);
         }
-
-        fetch('/restart', {method: 'POST'});
-    }, 600);
+    }
 </script>
 </body>
 </html>

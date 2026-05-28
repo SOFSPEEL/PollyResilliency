@@ -116,7 +116,7 @@ section {
 
 .circuit-area {
   display: grid;
-  grid-template-columns: minmax(9rem, 12rem) minmax(0, 1fr) minmax(9rem, 12rem);
+  grid-template-columns: minmax(7rem, 9rem) minmax(32rem, 1fr) minmax(7rem, 9rem);
   align-items: center;
   gap: 0;
   min-height: 0;
@@ -137,7 +137,7 @@ section {
 .node-title {
   text-align: center;
   font-weight: 900;
-  font-size: 1.05rem;
+  font-size: .95rem;
 }
 
 .node-status {
@@ -164,10 +164,10 @@ section {
 }
 
 .diagram-bottom {
-  width: min(46rem, calc(100% - 4rem));
+  width: min(84rem, 100%);
   justify-self: center;
   display: grid;
-  gap: .55rem;
+  gap: .65rem;
 }
 
 .status-legend {
@@ -210,8 +210,8 @@ section {
 
 .call-graph {
   width: 100%;
-  height: 9.5rem;
-  padding: .65rem .75rem .75rem;
+  height: 17rem;
+  padding: .9rem 1rem 1rem;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: rgba(18, 24, 32, .94);
@@ -235,10 +235,10 @@ section {
 
 .backoff-time-chart {
   display: grid;
-  grid-template-columns: 1.75rem minmax(0, 1fr);
-  gap: .4rem;
-  height: 5.25rem;
-  margin-top: .45rem;
+  grid-template-columns: 2.25rem minmax(0, 1fr);
+  gap: .65rem;
+  height: 12rem;
+  margin-top: .65rem;
 }
 
 .backoff-y-axis {
@@ -264,8 +264,8 @@ section {
 .timeline-axis {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  margin-top: .2rem;
-  margin-left: 2.15rem;
+  margin-top: .4rem;
+  margin-left: 2.9rem;
   color: var(--muted);
   font-size: .66rem;
   font-weight: 900;
@@ -336,7 +336,7 @@ section {
   height: 10rem;
   display: grid;
   place-items: center;
-  margin-inline: -.65rem;
+  margin-inline: 0;
   z-index: 2;
 }
 
@@ -346,17 +346,18 @@ section {
 
 .breaker {
   position: absolute;
-  width: calc(100% + 1.3rem);
+  inset-inline: 0;
+  width: 100%;
   height: 8rem;
   --circuit-color: var(--red);
   --terminal-y: 3.75rem;
-  --left-terminal-x: 47%;
-  --right-terminal-x: 53%;
+  --left-terminal-x: 38%;
+  --right-terminal-x: 62%;
   --wire-height: .32rem;
-  background: #f7f7f7;
-  border: 1px solid #dde2e9;
+  background: transparent;
+  border: 0;
   border-radius: 0;
-  box-shadow: 0 18px 42px rgba(0, 0, 0, .28);
+  box-shadow: none;
 }
 
 .breaker-label {

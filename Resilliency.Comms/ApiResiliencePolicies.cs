@@ -3,7 +3,6 @@ using Polly;
 using Polly.CircuitBreaker;
 using Polly.Fallback;
 using Polly.Retry;
-using Polly.Timeout;
 
 namespace Resilliency.Comms;
 
@@ -23,7 +22,6 @@ public static class ApiResiliencePolicies
             .AddFallback(CreateFallbackForUnavailableServer(log))
             .AddRetry(CreateExponentialBackoffRetryFor529(log, options))
             .AddCircuitBreaker(CreateCircuitBreakerForRepeatedFailures(log, circuitStateChanged, options))
-            .AddTimeout(CreatePerTryTimeout(log, options))
             .Build();
     }
 
@@ -58,7 +56,6 @@ public static class ApiResiliencePolicies
             Delay = options.RetryDelay,
             BackoffType = DelayBackoffType.Exponential,
             ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
-                .Handle<TimeoutRejectedException>()
                 .HandleResult(response => (int)response.StatusCode == 529),
             OnRetry = args =>
             {
@@ -79,7 +76,6 @@ public static class ApiResiliencePolicies
             SamplingDuration = TimeSpan.FromSeconds(10),
             BreakDuration = options.BreakDuration,
             ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
-                .Handle<TimeoutRejectedException>()
                 .HandleResult(response => (int)response.StatusCode == 529),
             OnOpened = args =>
             {
@@ -101,19 +97,6 @@ public static class ApiResiliencePolicies
                 log("CIRCUIT CLOSED: probe succeeded; normal traffic resumes.");
                 LogCircuitState(log, CircuitBreakerVisualState.Closed);
                 circuitStateChanged?.Invoke(CircuitBreakerVisualState.Closed);
-                return default;
-            }
-        };
-
-    private static TimeoutStrategyOptions CreatePerTryTimeout(
-        Action<string> log,
-        ApiResiliencePolicyOptions options) =>
-        new()
-        {
-            Timeout = options.Timeout,
-            OnTimeout = args =>
-            {
-                log($"TIMEOUT: call exceeded {args.Timeout.TotalMilliseconds:N0} ms.");
                 return default;
             }
         };

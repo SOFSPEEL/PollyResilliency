@@ -14,8 +14,7 @@ var events = new DemoEventHub();
 var demoPolicyOptions = new ApiResiliencePolicyOptions
 {
     RetryDelay = TimeSpan.FromSeconds(1),
-    BreakDuration = TimeSpan.FromSeconds(8),
-    Timeout = TimeSpan.FromSeconds(1)
+    BreakDuration = TimeSpan.FromSeconds(8)
 };
 
 builder.Services.AddSingleton(events);
