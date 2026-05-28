@@ -61,6 +61,11 @@ internal static class DemoRouteExtensions
         Console.WriteLine(line);
         eventHub.Publish("log", line);
         eventHub.Publish("api-status", $"HTTP {statusCode}", statusCode.ToString());
+        eventHub.Publish(new DemoEvent(
+            Type: "graph-bar",
+            Message: statusCode.ToString(),
+            State: statusCode.ToString(),
+            GraphLabel: GetGraphLabel(statusCode)));
 
         if (delayMs > 0)
         {
@@ -69,6 +74,15 @@ internal static class DemoRouteExtensions
 
         return Results.Text($"HTTP {statusCode}", statusCode: statusCode);
     }
+
+    private static string GetGraphLabel(int statusCode) =>
+        statusCode switch
+        {
+            StatusCodes.Status200OK => "Healthy",
+            529 => "BackingOff",
+            StatusCodes.Status404NotFound => "No Retries",
+            _ => $"HTTP {statusCode}"
+        };
 
     private static async Task WriteEventAsync(HttpContext context, DemoEvent demoEvent)
     {

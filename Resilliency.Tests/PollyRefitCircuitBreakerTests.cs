@@ -42,7 +42,15 @@ public class PollyRefitCircuitBreakerTests
 
         Log($"RESULT: recovery response was {(int)recoveredResponse.StatusCode} {recoveredResponse.StatusCode}.");
 
-        Log("SCENARIO 4: call a server-down URL; fallback returns the customer apology message.");
+        Log("SCENARIO 4: call /status/404; fallback returns the customer apology message without retrying.");
+        var notFoundFallbackResponse = await pipeline.ExecuteAsync(
+            cancellationToken => new ValueTask<HttpResponseMessage>(api.GetStatusAsync(404, delayMs: 0, cancellationToken)),
+            TestContext.CurrentContext.CancellationToken);
+        var notFoundFallbackMessage = await notFoundFallbackResponse.Content.ReadAsStringAsync(TestContext.CurrentContext.CancellationToken);
+
+        Log($"RESULT: 404 fallback response was {(int)notFoundFallbackResponse.StatusCode} {notFoundFallbackResponse.StatusCode}: {notFoundFallbackMessage}");
+
+        Log("SCENARIO 5: call a server-down URL; fallback returns the customer apology message.");
         await using var serverDownProvider = CreateServiceProvider(new Uri($"http://127.0.0.1:{GetAvailablePort()}/"));
         var serverDownApi = serverDownProvider.GetRequiredService<IStatusCodeApi>();
         var serverDownPipeline = serverDownProvider.GetRequiredService<ResiliencePipeline<HttpResponseMessage>>();
@@ -57,9 +65,11 @@ public class PollyRefitCircuitBreakerTests
         {
             Assert.That((int)failedResponse.StatusCode, Is.EqualTo(529));
             Assert.That(recoveredResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+            Assert.That(notFoundFallbackResponse.StatusCode, Is.EqualTo(HttpStatusCode.ServiceUnavailable));
+            Assert.That(notFoundFallbackMessage, Is.EqualTo(ApiResiliencePolicies.ServerUnavailableFallbackMessage));
             Assert.That(fallbackResponse.StatusCode, Is.EqualTo(HttpStatusCode.ServiceUnavailable));
             Assert.That(fallbackMessage, Is.EqualTo(ApiResiliencePolicies.ServerUnavailableFallbackMessage));
-            Assert.That(server.RequestCount, Is.EqualTo(5));
+            Assert.That(server.RequestCount, Is.EqualTo(6));
         });
     }
 

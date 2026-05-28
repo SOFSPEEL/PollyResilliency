@@ -4,12 +4,12 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Polly Circuit Breaker Demo</title>
-    <link rel="stylesheet" href="/styles.css?v=10">
+    <link rel="stylesheet" href="/styles.css?v=29">
 </head>
 <body class="closed">
 <header>
     <h1>Polly + Refit Circuit Breaker Demo</h1>
-    <button id="run">Run Scenario</button>
+    <button id="run">Restart</button>
 </header>
 <main>
     <section class="stage">
@@ -41,21 +41,21 @@
                 </div>
             </div>
             <div class="diagram-bottom">
-                <div class="call-graph" aria-label="Backoff delay over elapsed time">
+                <div class="call-graph" aria-label="Backoff delay by call count">
                     <div class="graph-title">Backoff Delay Over Time</div>
-                    <div class="graph-subtitle">X = elapsed demo time, height = retry wait; green/red bars show HTTP results</div>
+                    <div class="graph-subtitle">X = calls made, height = retry wait; green/red bars show HTTP results</div>
                     <div class="backoff-time-chart">
-                        <div class="backoff-y-axis"><span>4s</span><span>2s</span><span>0s</span></div>
+                        <div class="backoff-y-axis"><span>9s</span><span>3s</span><span>0s</span></div>
                         <div class="backoff-time-plot" id="backoffBars">
                             <div class="backoff-empty">Bars appear as calls and retry waits happen</div>
                         </div>
                     </div>
-                    <div class="timeline-axis"><span>0s</span><span>30s</span><span>60s</span></div>
+                    <div class="timeline-axis" id="graphAxis"></div>
                 </div>
                 <div class="status-legend" aria-label="HTTP status legend">
                     <div class="legend-item"><span class="legend-code success">200</span><span>Healthy response</span></div>
                     <div class="legend-item"><span class="legend-code warning">529</span><span>Overloaded, retry with backoff</span></div>
-                    <div class="legend-item"><span class="legend-code error">503</span><span>Fallback apology response</span></div>
+                    <div class="legend-item"><span class="legend-code error">404</span><span>Not found, fallback apology</span></div>
                     <div class="legend-item"><span class="legend-code down">DOWN</span><span>No server connection</span></div>
                 </div>
             </div>
@@ -67,12 +67,14 @@
     const flowStatus = document.getElementById('flowStatus');
     const storyList = document.getElementById('storyList');
     const backoffBars = document.getElementById('backoffBars');
+    const graphAxis = document.getElementById('graphAxis');
+    const totalCallSlots = 10;
     let httpFlashTimer;
-    let firstHttpCallAt;
+    let callCount = 0;
+    let lastRetryCallNumber = 0;
 
     function addLog(message) {
         const text = message.split('|').pop().trim();
-        addStatusBarFromLog(text);
         inferFlowFromLog(text);
     }
 
@@ -104,29 +106,25 @@
         httpFlashTimer = setTimeout(() => document.body.classList.remove('http-flash'), 1600);
     }
 
-    function getElapsedSeconds() {
-        const now = performance.now();
-        firstHttpCallAt ??= now;
-        return (now - firstHttpCallAt) / 1000;
+    function addGraphBar(status, label) {
+        callCount += 1;
+        addAxisLabel(label, callCount);
+
+        if (status === '529') {
+            lastRetryCallNumber = callCount;
+            return;
+        }
+
+        addStatusBar(status, label, callCount);
     }
 
-    function addStatusBarFromLog(text) {
-        if (!text.includes('API SERVER: received')) return;
-
-        const status = text.match(/returning HTTP ([0-9]+)/)?.[1];
-        if (!status) return;
-
-        addStatusBar(status, `HTTP ${status}`);
-    }
-
-    function addStatusBar(status, label) {
-        const elapsedSeconds = getElapsedSeconds();
+    function addStatusBar(status, label, callNumber) {
         backoffBars.querySelector('.backoff-empty')?.remove();
 
         const bar = document.createElement('div');
         bar.className = `status-bar status-${status}`;
-        bar.style.setProperty('--bar-left', `${Math.min(96, 4 + (elapsedSeconds / 60) * 92)}%`);
-        bar.title = `${label} at +${elapsedSeconds.toFixed(1)}s`;
+        bar.style.setProperty('--bar-left', getCallLeft(callNumber));
+        bar.title = `HTTP ${status}: ${label} on call ${callNumber}`;
         bar.textContent = status;
         backoffBars.appendChild(bar);
     }
@@ -138,14 +136,30 @@
         backoffBars.querySelector('.backoff-empty')?.remove();
 
         const seconds = milliseconds / 1000;
-        const elapsedSeconds = getElapsedSeconds();
         const bar = document.createElement('div');
         bar.className = 'backoff-bar';
-        bar.style.setProperty('--bar-left', `${Math.min(96, 4 + (elapsedSeconds / 60) * 92)}%`);
-        bar.style.setProperty('--bar-height', `${Math.min(100, (seconds / 4) * 100)}%`);
+        bar.style.setProperty('--bar-left', getCallLeft(lastRetryCallNumber));
+        bar.style.setProperty('--bar-height', `${Math.min(100, (seconds / 9) * 100)}%`);
         bar.innerHTML = `<strong>${statusCode ?? '529'}</strong>`;
-        bar.title = `HTTP ${statusCode ?? '529'} retry waits ${seconds}s at +${elapsedSeconds.toFixed(1)}s`;
+        bar.title = `HTTP ${statusCode ?? '529'} retry waits ${formatSeconds(seconds)} after call ${lastRetryCallNumber}`;
         backoffBars.appendChild(bar);
+    }
+
+    function addAxisLabel(label, callNumber) {
+        const marker = document.createElement('span');
+        marker.className = 'axis-label';
+        marker.style.setProperty('--bar-left', getCallLeft(callNumber));
+        marker.textContent = label;
+        marker.title = `Call ${callNumber}: ${label}`;
+        graphAxis.appendChild(marker);
+    }
+
+    function getCallLeft(callNumber) {
+        return `${Math.min(100, Math.max(0, ((callNumber - 1) / totalCallSlots) * 100))}%`;
+    }
+
+    function formatSeconds(seconds) {
+        return `${seconds.toLocaleString(undefined, {maximumFractionDigits: 1})}s`;
     }
 
     function inferFlowFromLog(text) {
@@ -182,7 +196,7 @@
         if (text.includes('EXPONENTIAL BACKOFF')) {
             const wait = text.match(/waiting ([0-9,]+) ms/);
             const status = text.match(/HTTP ([0-9]+)/)?.[1];
-            const delay = wait ? `${wait[1]} ms` : 'before retry';
+            const delay = wait ? formatSeconds(Number(wait[1].replace(/,/g, '')) / 1000) : 'before retry';
             if (wait) addBackoffBar(wait[1], status);
             addStory(`backoff-${delay}`, `Backoff waits ${delay} so we are not hammering the server.`);
             setFlow('backoff', `Backoff ${delay}: not hammering`);
@@ -209,6 +223,12 @@
         if (text.includes('recovery response')) {
             addStory('recovered', 'Probe succeeds with HTTP 200 and the circuit closes.');
             setFlow('idle', 'Recovered');
+            return;
+        }
+
+        if (text.includes('request HTTP 404')) {
+            addStory('404-fallback', 'HTTP 404 cannot be fixed by retry, so Polly uses fallback immediately.');
+            setFlow('fallback', 'HTTP 404: fallback without retry');
             return;
         }
 
@@ -243,7 +263,6 @@
         document.body.classList.remove('http-flash');
         addStory('fallback', `Fallback response returned: ${message}`);
         setFlow('fallback', 'Fallback response returned locally');
-        addStatusBar('503', 'Fallback HTTP 503');
     }
 
     function setApiStatus(status) {
@@ -259,6 +278,7 @@
         if (data.Type === 'state' && data.State) setState(data.State);
         if (data.Type === 'api-status' && data.State) setApiStatus(data.State);
         if (data.Type === 'fallback') setFallback(data.Message);
+        if (data.Type === 'graph-bar' && data.State && data.GraphLabel) addGraphBar(data.State, data.GraphLabel);
         if (data.Type === 'log') addLog(data.Message);
     };
 
@@ -277,8 +297,10 @@
     }
 
     function resetBackoffGraph() {
-        firstHttpCallAt = undefined;
+        callCount = 0;
+        lastRetryCallNumber = 0;
         backoffBars.querySelectorAll('.backoff-bar, .status-bar').forEach(bar => bar.remove());
+        graphAxis.replaceChildren();
         if (!backoffBars.querySelector('.backoff-empty')) {
             const empty = document.createElement('div');
             empty.className = 'backoff-empty';

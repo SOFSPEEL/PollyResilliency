@@ -17,8 +17,11 @@ internal sealed class DemoEventHub
 
     public void Publish(string type, string message, string? state = null)
     {
-        var demoEvent = new DemoEvent(type, message, state);
+        Publish(new DemoEvent(type, message, state));
+    }
 
+    public void Publish(DemoEvent demoEvent)
+    {
         foreach (var subscriber in _subscribers.Values)
         {
             subscriber.Writer.TryWrite(demoEvent);

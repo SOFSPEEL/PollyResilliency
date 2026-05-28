@@ -78,7 +78,7 @@ internal sealed class DemoScenarioRunner(
         var api = services.GetRequiredService<IStatusCodeApi>();
         var pipeline = services.GetRequiredService<ResiliencePipeline<HttpResponseMessage>>();
 
-        events.Publish("state", "Circuit starts closed", CircuitBreakerVisualState.Closed.ToString());
+        events.Publish("state", "Circuit starts closed", nameof(CircuitBreakerVisualState.Closed));
         await PauseForVisualStateAsync("PAUSE: closed circuit, calls can flow to the API.", pause, cancellationToken);
 
         events.Publish("log", $"{DateTimeOffset.Now:HH:mm:ss.fff} | SCENARIO 0: healthy HTTP 200 call number 1 flows through the closed circuit.");
@@ -121,8 +121,18 @@ internal sealed class DemoScenarioRunner(
         events.Publish("log", $"{DateTimeOffset.Now:HH:mm:ss.fff} | RESULT: recovery response was {(int)recoveredResponse.StatusCode} {recoveredResponse.StatusCode}.");
         await PauseForVisualStateAsync("PAUSE: circuit is closed again after the successful probe.", TimeSpan.FromSeconds(5), cancellationToken);
 
-        events.Publish("log", $"{DateTimeOffset.Now:HH:mm:ss.fff} | SCENARIO 4: call a server-down URL; fallback returns the customer apology message.");
-        var downApi = RestService.For<IStatusCodeApi>("http://127.0.0.1:1");
+        events.Publish("log", $"{DateTimeOffset.Now:HH:mm:ss.fff} | SCENARIO 4: request HTTP 404; this is not retryable, so Polly returns the fallback apology without backoff.");
+        var notFoundFallbackResponse = await pipeline.ExecuteAsync(
+            token => new ValueTask<HttpResponseMessage>(api.GetStatusAsync(404, delayMs: 0, token)),
+            cancellationToken);
+        var notFoundFallbackMessage = await notFoundFallbackResponse.Content.ReadAsStringAsync(cancellationToken);
+        events.Publish("api-status", "HTTP 404", "404");
+        events.Publish(new DemoEvent("graph-bar", "404", "404", "404 STOP"));
+        events.Publish("fallback", notFoundFallbackMessage, ((int)notFoundFallbackResponse.StatusCode).ToString());
+        events.Publish("log", $"{DateTimeOffset.Now:HH:mm:ss.fff} | FALLBACK RESPONSE: {notFoundFallbackMessage}");
+        await PauseForVisualStateAsync("PAUSE: 404 was handled once and was not retried.", TimeSpan.FromSeconds(5), cancellationToken);
+
+        events.Publish("log", $"{DateTimeOffset.Now:HH:mm:ss.fff} | SCENARIO 5: call a server-down URL; fallback returns the customer apology message.");
         var downPipeline = ApiResiliencePolicies.Create(message =>
         {
             var line = $"{DateTimeOffset.Now:HH:mm:ss.fff} | {message}";
@@ -130,7 +140,9 @@ internal sealed class DemoScenarioRunner(
             events.Publish("log", line);
         }, options: options.PolicyOptions);
         var fallbackResponse = await downPipeline.ExecuteAsync(
-            token => new ValueTask<HttpResponseMessage>(downApi.GetStatusAsync(200, delayMs: 0, token)),
+            _ => new ValueTask<HttpResponseMessage>(
+                Task.FromException<HttpResponseMessage>(
+                    new HttpRequestException("No server connection."))),
             cancellationToken);
         var fallbackMessage = await fallbackResponse.Content.ReadAsStringAsync(cancellationToken);
         events.Publish("api-status", $"HTTP {(int)fallbackResponse.StatusCode}", ((int)fallbackResponse.StatusCode).ToString());

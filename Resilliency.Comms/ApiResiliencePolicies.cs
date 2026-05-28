@@ -29,7 +29,8 @@ public static class ApiResiliencePolicies
         new()
         {
             ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
-                .Handle<HttpRequestException>(),
+                .Handle<HttpRequestException>()
+                .HandleResult(response => response.StatusCode == HttpStatusCode.NotFound),
             FallbackAction = _ =>
             {
                 log($"FALLBACK: {ServerUnavailableFallbackMessage}");
@@ -54,7 +55,8 @@ public static class ApiResiliencePolicies
         {
             MaxRetryAttempts = options.MaxRetryAttempts,
             Delay = options.RetryDelay,
-            BackoffType = DelayBackoffType.Exponential,
+            DelayGenerator = args => new ValueTask<TimeSpan?>(
+                TimeSpan.FromMilliseconds(options.RetryDelay.TotalMilliseconds * Math.Pow(3, args.AttemptNumber))),
             ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
                 .HandleResult(response => (int)response.StatusCode == 529),
             OnRetry = args =>
