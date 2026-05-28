@@ -36,11 +36,9 @@ internal static class DemoRouteExtensions
 
     private static async Task<IResult> RunScenarioAsync(
         DemoScenarioRunner runner,
-        UiStateHub eventHub,
         CancellationToken cancellationToken)
     {
         var started = await runner.TryRunAsync(cancellationToken);
-        eventHub.AddLog(started ? "SCENARIO: run requested." : "SCENARIO: run already in progress.");
         return Results.Accepted(value: new { status = started ? "started" : "already-running" });
     }
 
@@ -51,7 +49,6 @@ internal static class DemoRouteExtensions
     {
         eventHub.ResetScenario();
         eventHub.SetCircuitState(CircuitState.Closed);
-        eventHub.AddLog("SCENARIO: restart requested.");
         await runner.RestartAsync(cancellationToken);
         return Results.Accepted(value: new { status = "restarted" });
     }
@@ -63,9 +60,9 @@ internal static class DemoRouteExtensions
         HttpContext context)
     {
         var line =
-            $"{DateTimeOffset.Now:HH:mm:ss.fff} | API SERVER: received GET {context.Request.Path}{context.Request.QueryString}; returning HTTP {statusCode} after {delayMs} ms.";
+            $"{DateTimeOffset.Now:HH:mm:ss.fff} | RESPONDING SERVER: received GET {context.Request.Path}{context.Request.QueryString}; returning HTTP {statusCode} after {delayMs} ms.";
         Console.WriteLine(line);
-        eventHub.AddLog($"API SERVER: HTTP {statusCode} ({delayMs} ms delay)");
+        eventHub.AddLog($"SERVER: HTTP {statusCode}");
         eventHub.SetApiStatus(statusCode);
         eventHub.AddGraphBar(statusCode);
 

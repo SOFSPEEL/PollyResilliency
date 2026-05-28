@@ -36,7 +36,6 @@ internal sealed class UiStateHub
             _graphEntries.Clear();
             _backoffEntries.Clear();
             _logEntries.Clear();
-            _logEntries.Add(new UiLogEntry(DateTimeOffset.Now.ToString("HH:mm:ss.fff"), "SCENARIO: reset."));
             _callCount = 0;
             _lastRetryCallNumber = 0;
             _nextGraphLabel = null;
@@ -68,7 +67,7 @@ internal sealed class UiStateHub
             }
 
             _circuitState = state;
-            if (state is CircuitState.HalfOpen or CircuitState.Open)
+            if (state is CircuitState.HalfOpen)
             {
                 _nextGraphLabel = FormatCircuitLabel(state);
             }

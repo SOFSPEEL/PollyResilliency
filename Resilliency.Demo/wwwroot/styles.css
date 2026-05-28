@@ -309,13 +309,6 @@ section {
   box-shadow: 0 0 12px rgba(54, 194, 117, .24);
 }
 
-.status-bar.status-404,
-.status-bar.status-503,
-.status-bar.status-500 {
-  background: var(--red);
-  box-shadow: 0 0 12px rgba(239, 93, 96, .24);
-}
-
 .backoff-bar strong {
   line-height: 1;
 }

@@ -15,8 +15,8 @@ events.SetCircuitState(CircuitState.Closed);
 var demoPolicyOptions = new ApiResiliencePolicyOptions
 {
     CircuitFailureRatio = 0.75,
-    MaxRetryAttempts = 2,
-    CircuitMinimumThroughput = 3,
+    MaxRetryAttempts = 3,
+    CircuitMinimumThroughput = 4,
     RetryDelay = TimeSpan.FromSeconds(1),
     BreakDuration = TimeSpan.FromSeconds(8)
 };
@@ -30,11 +30,17 @@ builder.Services.AddStatusCodeApiComms(
     {
         var line = $"{DateTimeOffset.Now:HH:mm:ss.fff} | {message}";
         Console.WriteLine(line);
-        events.AddLog(message);
+        var pollyLog = MapPollyLogEntry(message);
+        if (pollyLog is not null)
+        {
+            events.AddLog(pollyLog);
+        }
     },
     state =>
     {
-        events.SetCircuitState(MapCircuitState(state));
+        var mappedState = MapCircuitState(state);
+        events.SetCircuitState(mappedState);
+        events.AddLog($"POLLY: CIRCUIT {FormatCircuitState(mappedState)}");
     },
     ServiceLifetime.Transient,
     demoPolicyOptions,
@@ -42,6 +48,7 @@ builder.Services.AddStatusCodeApiComms(
     {
         events.MarkNextCallAsRetry(backoff.AttemptNumber);
         events.AddRetryBackoff(backoff.StatusCode, (int)Math.Round(backoff.Delay.TotalMilliseconds));
+        events.AddLog($"POLLY: RETRY {backoff.AttemptNumber} ({backoff.Delay.TotalSeconds:0.#}s)");
     });
 
 var app = builder.Build();
@@ -96,5 +103,24 @@ static CircuitState MapCircuitState(CircuitBreakerVisualState state) =>
         CircuitBreakerVisualState.Open => CircuitState.Open,
         CircuitBreakerVisualState.HalfOpen => CircuitState.HalfOpen,
         _ => throw new ArgumentOutOfRangeException(nameof(state), state, null)
+    };
+
+static string? MapPollyLogEntry(string message)
+{
+    if (message.StartsWith("FALLBACK: server unavailable", StringComparison.Ordinal))
+    {
+        return "POLLY: FALLBACK";
+    }
+
+    return null;
+}
+
+static string FormatCircuitState(CircuitState state) =>
+    state switch
+    {
+        CircuitState.Closed => "CLOSED",
+        CircuitState.Open => "OPEN",
+        CircuitState.HalfOpen => "HALF-OPEN",
+        _ => state.ToString().ToUpperInvariant()
     };
 

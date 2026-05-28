@@ -13,7 +13,7 @@ internal sealed class DemoScenarioRunner(
     private static readonly RespondingServerPlanStep[] RespondingServerPlan =
     [
         new(HttpStatusCode.OK, 6),
-        new((HttpStatusCode)529, 9),
+        new((HttpStatusCode)529, 0),
         new(HttpStatusCode.OK, 5),
         new(HttpStatusCode.NotFound, 5)
     ];
@@ -61,13 +61,11 @@ internal sealed class DemoScenarioRunner(
             {
                 var line = $"{DateTimeOffset.Now:HH:mm:ss.fff} | DEMO RESTART: previous run was cancelled.";
                 Console.WriteLine(line);
-                events.AddLog("DEMO RESTART: previous run was cancelled.");
             }
             catch (Exception ex)
             {
                 var line = $"{DateTimeOffset.Now:HH:mm:ss.fff} | DEMO ERROR: {ex}";
                 Console.WriteLine(line);
-                events.AddLog($"DEMO ERROR: {ex.Message}");
             }
             finally
             {
@@ -93,7 +91,6 @@ internal sealed class DemoScenarioRunner(
 
         events.ResetScenario();
         events.SetCircuitState(CircuitState.Closed);
-        events.AddLog("SCENARIO: run started.");
         await PauseForVisualStateAsync(pause, cancellationToken);
 
         await RunPlannedCallAsync(api, pipeline, GetNextPlannedStep(ref nextPlanIndex), cancellationToken);
@@ -115,7 +112,6 @@ internal sealed class DemoScenarioRunner(
         catch (BrokenCircuitException)
         {
             blockedByOpenCircuit = true;
-            events.AddLog("SCENARIO: call blocked while circuit is open.");
         }
 
         if (blockedByOpenCircuit)
@@ -131,17 +127,6 @@ internal sealed class DemoScenarioRunner(
                 cancellationToken);
         }
 
-        var notFoundFallbackResponse = await pipeline.ExecuteAsync(
-            token =>
-            {
-                var plannedStep = GetNextPlannedStep(ref nextPlanIndex);
-                return new ValueTask<HttpResponseMessage>(
-                    api.GetStatusAsync((int)plannedStep.StatusCode, delayMs: plannedStep.HoldSeconds * 1000, token));
-            },
-            cancellationToken);
-        var notFoundFallbackMessage = await notFoundFallbackResponse.Content.ReadAsStringAsync(cancellationToken);
-        events.SetFallback(notFoundFallbackMessage, (int)notFoundFallbackResponse.StatusCode);
-        events.AddLog($"SCENARIO: completed with fallback HTTP {(int)notFoundFallbackResponse.StatusCode}.");
     }
 
     private async Task RunPlannedCallAsync(
