@@ -1,0 +1,20 @@
+# Build artifacts
+bin/
+obj/
+
+# User-specific files
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Rider / JetBrains
+.idea/
+
+# .NET test results and logs
+TestResults/
+*.trx
+
+# OS files
+.DS_Store
+

@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Polly Circuit Breaker Demo</title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="closed">
+<header>
+    <h1>Polly + Refit Circuit Breaker Demo</h1>
+    <button id="run">Run Scenario</button>
+</header>
+<main>
+    <section class="stage">
+        <aside class="storyboard">
+            <h2 class="story-title">Storyboard</h2>
+            <div id="storyList"></div>
+        </aside>
+        <div class="diagram">
+            <div class="circuit-area">
+                <div class="node">
+                    <div class="node-title">CALLING<br>SERVER</div>
+                </div>
+                <div class="wire">
+                    <div class="flow-status" id="flowStatus">Idle</div>
+                    <div class="breaker">
+                        <div class="switch-line switch-left-wire"></div>
+                        <div class="switch-line switch-right-wire"></div>
+                        <div class="terminal terminal-left"></div>
+                        <div class="terminal terminal-right"></div>
+                        <div class="switch-lever"></div>
+                        <div class="breaker-label"></div>
+                    </div>
+                </div>
+                <div class="node">
+                    <div>
+                        <div class="node-title">RESPONDING<br>SERVER</div>
+                        <div class="node-status" id="apiStatus">READY</div>
+                    </div>
+                </div>
+            </div>
+            <div class="diagram-bottom">
+                <div class="call-graph" aria-label="Backoff delay over elapsed time">
+                    <div class="graph-title">Backoff Delay Over Time</div>
+                    <div class="graph-subtitle">X = elapsed demo time, height = retry wait; green/red bars show HTTP results</div>
+                    <div class="backoff-time-chart">
+                        <div class="backoff-y-axis"><span>4s</span><span>2s</span><span>0s</span></div>
+                        <div class="backoff-time-plot" id="backoffBars">
+                            <div class="backoff-empty">Bars appear as calls and retry waits happen</div>
+                        </div>
+                    </div>
+                    <div class="timeline-axis"><span>0s</span><span>30s</span><span>60s</span></div>
+                </div>
+                <div class="status-legend" aria-label="HTTP status legend">
+                    <div class="legend-item"><span class="legend-code success">200</span><span>Healthy response</span></div>
+                    <div class="legend-item"><span class="legend-code warning">529</span><span>Overloaded, retry with backoff</span></div>
+                    <div class="legend-item"><span class="legend-code error">503</span><span>Fallback apology response</span></div>
+                    <div class="legend-item"><span class="legend-code down">DOWN</span><span>No server connection</span></div>
+                </div>
+            </div>
+        </div>
+    </section>
+</main>
+<script>
+    const apiStatus = document.getElementById('apiStatus');
+    const flowStatus = document.getElementById('flowStatus');
+    const storyList = document.getElementById('storyList');
+    const backoffBars = document.getElementById('backoffBars');
+    let httpFlashTimer;
+    let firstHttpCallAt;
+
+    function addLog(message) {
+        const text = message.split('|').pop().trim();
+        addStatusBarFromLog(text);
+        inferFlowFromLog(text);
+    }
+
+    function addStory(key, message) {
+        let item = storyList.querySelector(`[data-step="${key}"]`);
+        if (!item) {
+            item = document.createElement('div');
+            item.className = 'story-step';
+            item.dataset.step = key;
+            item.textContent = message;
+            storyList.appendChild(item);
+        } else {
+            item.textContent = message;
+        }
+
+        storyList.querySelectorAll('.story-step').forEach(row => row.classList.toggle('active', row === item));
+        item.scrollIntoView({block: 'nearest'});
+    }
+
+    function setFlow(mode, text) {
+        flowStatus.textContent = text;
+        document.body.classList.toggle('http-active', mode === 'calling' || mode === 'probe');
+    }
+
+    function flashHttpRequest(text) {
+        flowStatus.textContent = text;
+        document.body.classList.add('http-flash');
+        clearTimeout(httpFlashTimer);
+        httpFlashTimer = setTimeout(() => document.body.classList.remove('http-flash'), 1600);
+    }
+
+    function getElapsedSeconds() {
+        const now = performance.now();
+        firstHttpCallAt ??= now;
+        return (now - firstHttpCallAt) / 1000;
+    }
+
+    function addStatusBarFromLog(text) {
+        if (!text.includes('API SERVER: received')) return;
+
+        const status = text.match(/returning HTTP ([0-9]+)/)?.[1];
+        if (!status) return;
+
+        addStatusBar(status, `HTTP ${status}`);
+    }
+
+    function addStatusBar(status, label) {
+        const elapsedSeconds = getElapsedSeconds();
+        backoffBars.querySelector('.backoff-empty')?.remove();
+
+        const bar = document.createElement('div');
+        bar.className = `status-bar status-${status}`;
+        bar.style.setProperty('--bar-left', `${Math.min(96, 4 + (elapsedSeconds / 60) * 92)}%`);
+        bar.title = `${label} at +${elapsedSeconds.toFixed(1)}s`;
+        bar.textContent = status;
+        backoffBars.appendChild(bar);
+    }
+
+    function addBackoffBar(delayText) {
+        const milliseconds = Number(delayText.replace(/,/g, ''));
+        if (!Number.isFinite(milliseconds)) return;
+
+        backoffBars.querySelector('.backoff-empty')?.remove();
+
+        const seconds = milliseconds / 1000;
+        const elapsedSeconds = getElapsedSeconds();
+        const bar = document.createElement('div');
+        bar.className = 'backoff-bar';
+        bar.style.setProperty('--bar-left', `${Math.min(96, 4 + (elapsedSeconds / 60) * 92)}%`);
+        bar.style.setProperty('--bar-height', `${Math.min(100, (seconds / 4) * 100)}%`);
+        bar.innerHTML = `<strong>${seconds.toLocaleString(undefined, {maximumFractionDigits: 1})}s</strong>`;
+        bar.title = `${seconds}s wait at +${elapsedSeconds.toFixed(1)}s: not hammering the server`;
+        backoffBars.appendChild(bar);
+    }
+
+    function inferFlowFromLog(text) {
+        if (text.includes('healthy HTTP 200 call number 1')) {
+            addStory('healthy-1', 'Healthy call 1: closed circuit sends HTTP 200 to STATUS API.');
+            setFlow('calling', 'Healthy call 1: HTTP 200');
+            return;
+        }
+
+        if (text.includes('healthy call 1 returned')) {
+            addStory('healthy-1', 'Healthy call 1 succeeded with HTTP 200.');
+            setFlow('idle', 'Healthy call 1 succeeded');
+            return;
+        }
+
+        if (text.includes('healthy HTTP 200 call number 2')) {
+            addStory('healthy-2', 'Healthy call 2: circuit is still closed and traffic flows normally.');
+            setFlow('calling', 'Healthy call 2: HTTP 200');
+            return;
+        }
+
+        if (text.includes('healthy call 2 returned')) {
+            addStory('healthy-2', 'Healthy call 2 succeeded with HTTP 200.');
+            setFlow('idle', 'Healthy call 2 succeeded');
+            return;
+        }
+
+        if (text.includes('send HTTP 529')) {
+            addStory('529', 'HTTP 529 returned from the API. Polly starts exponential backoff.');
+            setFlow('calling', 'Calling API: HTTP 529');
+            return;
+        }
+
+        if (text.includes('EXPONENTIAL BACKOFF')) {
+            const wait = text.match(/waiting ([0-9,]+) ms/);
+            const delay = wait ? `${wait[1]} ms` : 'before retry';
+            if (wait) addBackoffBar(wait[1]);
+            addStory(`backoff-${delay}`, `Backoff waits ${delay} so we are not hammering the server.`);
+            setFlow('backoff', `Backoff ${delay}: not hammering`);
+            return;
+        }
+
+        if (text.includes('API SERVER: received')) {
+            flashHttpRequest('HTTP request reached STATUS API');
+            return;
+        }
+
+        if (text.includes('request HTTP 200 while open') || text.includes('blocked by open circuit')) {
+            addStory('blocked', 'Open circuit blocks the next call locally before HTTP.');
+            setFlow('blocked', 'Blocked locally before HTTP');
+            return;
+        }
+
+        if (text.includes('half-open probe') || text.includes('show half-open')) {
+            addStory('halfopen', 'Circuit moves half-open and allows one probe request.');
+            setFlow('probe', 'Half-open probe request');
+            return;
+        }
+
+        if (text.includes('recovery response')) {
+            addStory('recovered', 'Probe succeeds with HTTP 200 and the circuit closes.');
+            setFlow('idle', 'Recovered');
+            return;
+        }
+
+        if (text.includes('slow HTTP 200')) {
+            addStory('timeout', 'A slow HTTP 200 call exceeds the timeout window.');
+            setFlow('calling', 'Calling API: slow HTTP 200');
+            return;
+        }
+
+        if (text.includes('TIMEOUT')) {
+            addStory('timeout-retry', 'Timeout triggers exponential backoff before retrying.');
+            setFlow('backoff', 'Timeout: waiting before retry');
+            return;
+        }
+
+        if (text.includes('server-down URL')) {
+            addStory('fallback-start', 'Server is down. Polly will use the fallback response.');
+            setFlow('fallback', 'Server down: local fallback');
+            return;
+        }
+
+        if (text.includes('closed circuit')) {
+            addStory('closed', 'Circuit starts closed, so calls can flow to the API.');
+            return;
+        }
+
+        if (text.includes('open circuit')) {
+            addStory('open', 'Circuit is open: new calls fail fast before HTTP.');
+        }
+    }
+
+    function setState(next) {
+        const css = next.toLowerCase();
+        document.body.classList.remove('closed', 'open', 'halfopen', 'fallback');
+        document.body.classList.add(css === 'halfopen' ? 'halfopen' : css);
+        document.body.classList.remove('http-active');
+        document.body.classList.remove('http-flash');
+    }
+
+    function setFallback(message) {
+        document.body.classList.remove('closed', 'open', 'halfopen');
+        document.body.classList.add('fallback');
+        document.body.classList.remove('http-active');
+        document.body.classList.remove('http-flash');
+        addStory('fallback', `Fallback response returned: ${message}`);
+        setFlow('fallback', 'Fallback response returned locally');
+        addStatusBar('503', 'Fallback HTTP 503');
+    }
+
+    function setApiStatus(status) {
+        apiStatus.textContent = `HTTP ${status}`;
+        apiStatus.classList.remove('ok', 'error');
+        const code = Number(status);
+        apiStatus.classList.add(code >= 500 ? 'error' : 'ok');
+    }
+
+    const source = new EventSource('/events');
+    source.onmessage = event => {
+        const data = JSON.parse(event.data);
+        if (data.Type === 'state' && data.State) setState(data.State);
+        if (data.Type === 'api-status' && data.State) setApiStatus(data.State);
+        if (data.Type === 'fallback') setFallback(data.Message);
+        if (data.Type === 'log') addLog(data.Message);
+    };
+
+    document.getElementById('run').addEventListener('click', async () => {
+        await fetch('/run', {method: 'POST'});
+    });
+
+    setTimeout(() => {
+        firstHttpCallAt = undefined;
+        backoffBars.querySelectorAll('.backoff-bar').forEach(bar => bar.remove());
+        if (!backoffBars.querySelector('.backoff-empty')) {
+            const empty = document.createElement('div');
+            empty.className = 'backoff-empty';
+            empty.textContent = 'Bars appear as calls and retry waits happen';
+            backoffBars.appendChild(empty);
+        }
+
+        fetch('/restart', {method: 'POST'});
+    }, 600);
+</script>
+</body>
+</html>
