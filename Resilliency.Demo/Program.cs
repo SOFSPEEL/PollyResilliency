@@ -17,7 +17,7 @@ var demoPolicyOptions = new ApiResiliencePolicyOptions
 {
     CircuitFailureRatio = 0.75,
     MaxRetryAttempts = 3,
-    CircuitMinimumThroughput = 4,
+    CircuitMinimumThroughput = 5,
     SamplingDuration = TimeSpan.FromMinutes(2),
     RetryDelay = TimeSpan.FromSeconds(1),
     BreakDuration = TimeSpan.FromSeconds(8)
