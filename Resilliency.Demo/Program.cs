@@ -12,16 +12,19 @@ builder.WebHost.UseUrls(baseAddress.ToString());
 
 var events = new UiStateHub();
 events.SetCircuitState(CircuitState.Closed);
+var resilienceEventPublisher = EventHubResilienceEventPublisher.CreateInMemory();
 var demoPolicyOptions = new ApiResiliencePolicyOptions
 {
     CircuitFailureRatio = 0.75,
     MaxRetryAttempts = 3,
     CircuitMinimumThroughput = 4,
+    SamplingDuration = TimeSpan.FromMinutes(2),
     RetryDelay = TimeSpan.FromSeconds(1),
     BreakDuration = TimeSpan.FromSeconds(8)
 };
 
 builder.Services.AddSingleton(events);
+builder.Services.AddSingleton<IResilienceEventPublisher>(resilienceEventPublisher);
 builder.Services.AddSingleton(new DemoScenarioOptions(demoPolicyOptions));
 builder.Services.AddSingleton<DemoScenarioRunner>();
 builder.Services.AddStatusCodeApiComms(
@@ -34,6 +37,11 @@ builder.Services.AddStatusCodeApiComms(
         if (pollyLog is not null)
         {
             events.AddLog(pollyLog);
+        }
+
+        if (IsFallbackMessage(message))
+        {
+            events.SetFallback(ApiResiliencePolicies.ServerUnavailableFallbackMessage, (int)HttpStatusCode.NotFound);
         }
     },
     state =>
@@ -49,7 +57,8 @@ builder.Services.AddStatusCodeApiComms(
         events.MarkNextCallAsRetry(backoff.AttemptNumber);
         events.AddRetryBackoff(backoff.StatusCode, (int)Math.Round(backoff.Delay.TotalMilliseconds));
         events.AddLog($"POLLY: RETRY {backoff.AttemptNumber} ({backoff.Delay.TotalSeconds:0.#}s)");
-    });
+    },
+    resilienceEventPublisher);
 
 var app = builder.Build();
 
@@ -115,6 +124,12 @@ static string? MapPollyLogEntry(string message)
     return null;
 }
 
+static bool IsFallbackMessage(string message) =>
+    string.Equals(
+        message,
+        $"FALLBACK: {ApiResiliencePolicies.ServerUnavailableFallbackMessage}",
+        StringComparison.Ordinal);
+
 static string FormatCircuitState(CircuitState state) =>
     state switch
     {
@@ -123,4 +138,3 @@ static string FormatCircuitState(CircuitState state) =>
         CircuitState.HalfOpen => "HALF-OPEN",
         _ => state.ToString().ToUpperInvariant()
     };
-

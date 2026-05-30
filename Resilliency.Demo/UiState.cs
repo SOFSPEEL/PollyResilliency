@@ -2,6 +2,7 @@ namespace Resilliency.Demo;
 
 internal sealed record UiState(
     CircuitState CircuitState,
+    bool IsRunning,
     bool SendingHttp,
     int? ApiStatusCode,
     string? FallbackMessage,
@@ -14,4 +15,3 @@ internal sealed record UiGraphEntry(int CallNumber, int StatusCode, string Label
 internal sealed record UiBackoffEntry(int CallNumber, int StatusCode, int DelayMs);
 
 internal sealed record UiLogEntry(string Timestamp, string Message);
-

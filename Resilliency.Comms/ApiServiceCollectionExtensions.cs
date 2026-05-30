@@ -12,7 +12,8 @@ public static class ApiServiceCollectionExtensions
         Action<CircuitBreakerVisualState>? circuitStateChanged = null,
         ServiceLifetime pipelineLifetime = ServiceLifetime.Singleton,
         ApiResiliencePolicyOptions? options = null,
-        Action<(int StatusCode, int AttemptNumber, TimeSpan Delay)>? retryBackoffObserved = null)
+        Action<(int StatusCode, int AttemptNumber, TimeSpan Delay)>? retryBackoffObserved = null,
+        IResilienceEventPublisher? resilienceEventPublisher = null)
     {
         services.Add(
             new ServiceDescriptor(
@@ -21,7 +22,8 @@ public static class ApiServiceCollectionExtensions
                     log,
                     circuitStateChanged,
                     options,
-                    retryBackoffObserved),
+                    retryBackoffObserved,
+                    resilienceEventPublisher),
                 pipelineLifetime));
         services
             .AddRefitClient<IStatusCodeApi>()

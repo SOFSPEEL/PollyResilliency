@@ -15,18 +15,21 @@ public static class ApiResiliencePolicies
         Action<string> log,
         Action<CircuitBreakerVisualState>? circuitStateChanged = null,
         ApiResiliencePolicyOptions? options = null,
-        Action<(int StatusCode, int AttemptNumber, TimeSpan Delay)>? retryBackoffObserved = null)
+        Action<(int StatusCode, int AttemptNumber, TimeSpan Delay)>? retryBackoffObserved = null,
+        IResilienceEventPublisher? resilienceEventPublisher = null)
     {
         options ??= new ApiResiliencePolicyOptions();
 
         return new ResiliencePipelineBuilder<HttpResponseMessage>()
-            .AddFallback(CreateFallbackForUnavailableServer(log))
-            .AddRetry(CreateExponentialBackoffRetryFor529(log, options, retryBackoffObserved))
-            .AddCircuitBreaker(CreateCircuitBreakerForRepeatedFailures(log, circuitStateChanged, options))
+            .AddFallback(CreateFallbackForUnavailableServer(log, resilienceEventPublisher))
+            .AddRetry(CreateExponentialBackoffRetryFor529(options, retryBackoffObserved, resilienceEventPublisher, log))
+            .AddCircuitBreaker(CreateCircuitBreakerForRepeatedFailures(circuitStateChanged, options, resilienceEventPublisher, log))
             .Build();
     }
 
-    private static FallbackStrategyOptions<HttpResponseMessage> CreateFallbackForUnavailableServer(Action<string> log) =>
+    private static FallbackStrategyOptions<HttpResponseMessage> CreateFallbackForUnavailableServer(
+        Action<string> log,
+        IResilienceEventPublisher? resilienceEventPublisher) =>
         new()
         {
             ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
@@ -42,17 +45,26 @@ public static class ApiResiliencePolicies
 
                 return Outcome.FromResultAsValueTask(response);
             },
-            OnFallback = args =>
+            OnFallback = async args =>
             {
-                log($"FALLBACK: server unavailable after resilience handling: {Describe(args.Outcome)}.");
-                return default;
+                var message = $"FALLBACK: server unavailable after resilience handling: {Describe(args.Outcome)}.";
+                log(message);
+                await PublishSafelyAsync(
+                    resilienceEventPublisher,
+                    new ResilienceEvent(
+                        EventType: "fallback",
+                        Message: message,
+                        Timestamp: DateTimeOffset.UtcNow,
+                        StatusCode: args.Outcome.Result is null ? null : (int)args.Outcome.Result.StatusCode),
+                    log,
+                    args.Context.CancellationToken);
             }
         };
 
-    private static RetryStrategyOptions<HttpResponseMessage> CreateExponentialBackoffRetryFor529(
-        Action<string> log,
-        ApiResiliencePolicyOptions options,
-        Action<(int StatusCode, int AttemptNumber, TimeSpan Delay)>? retryBackoffObserved) =>
+    private static RetryStrategyOptions<HttpResponseMessage> CreateExponentialBackoffRetryFor529(ApiResiliencePolicyOptions options,
+        Action<(int StatusCode, int AttemptNumber, TimeSpan Delay)>? retryBackoffObserved,
+        IResilienceEventPublisher? resilienceEventPublisher,
+        Action<string> log) =>
         new()
         {
             MaxRetryAttempts = options.MaxRetryAttempts,
@@ -65,19 +77,30 @@ public static class ApiResiliencePolicies
             {
                 if (args.Outcome.Result is not null)
                 {
-                    retryBackoffObserved?.Invoke(((int)args.Outcome.Result.StatusCode, args.AttemptNumber + 1, args.RetryDelay));
+                    var statusCode = (int)args.Outcome.Result.StatusCode;
+                    var attemptNumber = args.AttemptNumber + 1;
+                    retryBackoffObserved?.Invoke((statusCode, attemptNumber, args.RetryDelay));
+                    return PublishSafelyAsync(
+                        resilienceEventPublisher,
+                        new ResilienceEvent(
+                            EventType: "retry",
+                            Message: $"Retry {attemptNumber} for HTTP {statusCode} after {args.RetryDelay.TotalMilliseconds:0} ms.",
+                            Timestamp: DateTimeOffset.UtcNow,
+                            StatusCode: statusCode,
+                            AttemptNumber: attemptNumber,
+                            DelayMilliseconds: (int)Math.Round(args.RetryDelay.TotalMilliseconds)),
+                        log,
+                        args.Context.CancellationToken);
                 }
 
-                log(
-                    $"EXPONENTIAL BACKOFF: retry {args.AttemptNumber + 1} after {Describe(args.Outcome)}; waiting {args.RetryDelay.TotalMilliseconds:N0} ms so we are not hammering the server.");
                 return default;
             }
         };
 
-    private static CircuitBreakerStrategyOptions<HttpResponseMessage> CreateCircuitBreakerForRepeatedFailures(
-        Action<string> log,
-        Action<CircuitBreakerVisualState>? circuitStateChanged,
-        ApiResiliencePolicyOptions options) =>
+    private static CircuitBreakerStrategyOptions<HttpResponseMessage> CreateCircuitBreakerForRepeatedFailures(Action<CircuitBreakerVisualState>? circuitStateChanged,
+        ApiResiliencePolicyOptions options,
+        IResilienceEventPublisher? resilienceEventPublisher,
+        Action<string> log) =>
         new()
         {
             FailureRatio = options.CircuitFailureRatio,
@@ -86,29 +109,74 @@ public static class ApiResiliencePolicies
             BreakDuration = options.BreakDuration,
             ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
                 .HandleResult(response => (int)response.StatusCode == 529),
-            OnOpened = args =>
+            OnOpened = _ =>
             {
-                log(
-                    $"CIRCUIT OPEN: failures reached threshold; blocking calls for {args.BreakDuration.TotalSeconds:N0} seconds.");
-                LogCircuitState(log, CircuitBreakerVisualState.Open);
-                circuitStateChanged?.Invoke(CircuitBreakerVisualState.Open);
-                return default;
+                return OnCircuitStateChangedAsync(
+                    CircuitBreakerVisualState.Open,
+                    circuitStateChanged,
+                    resilienceEventPublisher,
+                    log,
+                    CancellationToken.None);
             },
             OnHalfOpened = _ =>
             {
-                log("CIRCUIT HALF-OPEN: next call is a probe.");
-                LogCircuitState(log, CircuitBreakerVisualState.HalfOpen);
-                circuitStateChanged?.Invoke(CircuitBreakerVisualState.HalfOpen);
-                return default;
+                return OnCircuitStateChangedAsync(
+                    CircuitBreakerVisualState.HalfOpen,
+                    circuitStateChanged,
+                    resilienceEventPublisher,
+                    log,
+                    CancellationToken.None);
             },
             OnClosed = _ =>
             {
-                log("CIRCUIT CLOSED: probe succeeded; normal traffic resumes.");
-                LogCircuitState(log, CircuitBreakerVisualState.Closed);
-                circuitStateChanged?.Invoke(CircuitBreakerVisualState.Closed);
-                return default;
+                return OnCircuitStateChangedAsync(
+                    CircuitBreakerVisualState.Closed,
+                    circuitStateChanged,
+                    resilienceEventPublisher,
+                    log,
+                    CancellationToken.None);
             }
         };
+
+    private static ValueTask OnCircuitStateChangedAsync(
+        CircuitBreakerVisualState state,
+        Action<CircuitBreakerVisualState>? circuitStateChanged,
+        IResilienceEventPublisher? resilienceEventPublisher,
+        Action<string> log,
+        CancellationToken cancellationToken)
+    {
+        circuitStateChanged?.Invoke(state);
+        return PublishSafelyAsync(
+            resilienceEventPublisher,
+            new ResilienceEvent(
+                EventType: "circuit-state",
+                Message: $"Circuit is {state}.",
+                Timestamp: DateTimeOffset.UtcNow,
+                CircuitState: state.ToString()),
+            log,
+            cancellationToken);
+    }
+
+    private static async ValueTask PublishSafelyAsync(
+        IResilienceEventPublisher? resilienceEventPublisher,
+        ResilienceEvent resilienceEvent,
+        Action<string> log,
+        CancellationToken cancellationToken)
+    {
+        if (resilienceEventPublisher is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await resilienceEventPublisher.PublishAsync(resilienceEvent, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            log($"EVENTHUB: failed to publish {resilienceEvent.EventType} event: {ex.Message}");
+        }
+    }
 
     private static string Describe(Outcome<HttpResponseMessage> outcome)
     {
@@ -124,25 +192,4 @@ public static class ApiResiliencePolicies
 
         return "No response";
     }
-
-    private static void LogCircuitState(Action<string> log, CircuitBreakerVisualState state)
-    {
-        log("CIRCUIT STATE:");
-        log($"  client {Wire(state is CircuitBreakerVisualState.Closed or CircuitBreakerVisualState.HalfOpen)} api");
-        log($"         {StateLabel(state)}");
-        log("  CLOSED    -> calls flow normally");
-        log("  OPEN      -> calls fail fast before HTTP");
-        log("  HALF-OPEN -> one probe call decides recovery");
-    }
-
-    private static string Wire(bool connected) => connected ? "=========>" : "===X====>";
-
-    private static string StateLabel(CircuitBreakerVisualState state) =>
-        state switch
-        {
-            CircuitBreakerVisualState.Closed => "[ CLOSED ]",
-            CircuitBreakerVisualState.Open => "[  OPEN  ]",
-            CircuitBreakerVisualState.HalfOpen => "[HALF-OPEN]",
-            _ => throw new ArgumentOutOfRangeException(nameof(state), state, null)
-        };
 }

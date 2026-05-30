@@ -10,6 +10,7 @@ internal sealed class UiStateHub
     private readonly ConcurrentDictionary<Guid, Channel<UiState>> _subscribers = new();
     private readonly Lock _stateSync = new();
     private CircuitState _circuitState = CircuitState.Closed;
+    private bool _isRunning;
     private int? _apiStatusCode;
     private string? _fallbackMessage;
     private readonly List<UiGraphEntry> _graphEntries = [];
@@ -39,6 +40,20 @@ internal sealed class UiStateHub
             _callCount = 0;
             _lastRetryCallNumber = 0;
             _nextGraphLabel = null;
+            PublishUiStateChanged();
+        }
+    }
+
+    public void SetRunning(bool isRunning)
+    {
+        lock (_stateSync)
+        {
+            if (_isRunning == isRunning)
+            {
+                return;
+            }
+
+            _isRunning = isRunning;
             PublishUiStateChanged();
         }
     }
@@ -189,6 +204,7 @@ internal sealed class UiStateHub
     private UiState CreateUiState() =>
         new(
             CircuitState: _circuitState,
+            IsRunning: _isRunning,
             SendingHttp: _circuitState is CircuitState.Closed or CircuitState.HalfOpen,
             ApiStatusCode: _apiStatusCode,
             FallbackMessage: _fallbackMessage,
@@ -196,4 +212,3 @@ internal sealed class UiStateHub
             BackoffEntries: _backoffEntries.ToArray(),
             LogEntries: _logEntries.ToArray());
 }
-

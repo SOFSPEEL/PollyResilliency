@@ -10,14 +10,6 @@ internal sealed class DemoScenarioRunner(
     UiStateHub events,
     DemoScenarioOptions demoOptions)
 {
-    private static readonly RespondingServerPlanStep[] RespondingServerPlan =
-    [
-        new(HttpStatusCode.OK, 6),
-        new((HttpStatusCode)529, 0),
-        new(HttpStatusCode.OK, 5),
-        new(HttpStatusCode.NotFound, 5)
-    ];
-
     private readonly SemaphoreSlim _scenarioLock = new(1, 1);
     private CancellationTokenSource? _currentRunCancellation;
 
@@ -50,6 +42,7 @@ internal sealed class DemoScenarioRunner(
 
         var runCancellation = new CancellationTokenSource();
         _currentRunCancellation = runCancellation;
+        events.SetRunning(true);
 
         _ = Task.Run(async () =>
         {
@@ -74,6 +67,7 @@ internal sealed class DemoScenarioRunner(
                     _currentRunCancellation = null;
                 }
 
+                events.SetRunning(false);
                 runCancellation.Dispose();
                 _scenarioLock.Release();
             }
@@ -84,79 +78,59 @@ internal sealed class DemoScenarioRunner(
 
     private async Task RunAsync(CancellationToken cancellationToken)
     {
-        var pause = TimeSpan.FromSeconds(5);
         var api = services.GetRequiredService<IStatusCodeApi>();
         var pipeline = services.GetRequiredService<ResiliencePipeline<HttpResponseMessage>>();
-        int nextPlanIndex = 0;
 
         events.ResetScenario();
         events.SetCircuitState(CircuitState.Closed);
-        await PauseForVisualStateAsync(pause, cancellationToken);
 
-        await RunPlannedCallAsync(api, pipeline, GetNextPlannedStep(ref nextPlanIndex), cancellationToken);
-
-        await RunPlannedCallAsync(api, pipeline, GetNextPlannedStep(ref nextPlanIndex), cancellationToken);
-
-        var blockedByOpenCircuit = false;
-        try
+        foreach (var plannedStep in CreateRespondingServerPlan())
         {
-            await pipeline.ExecuteAsync(
-                token =>
-                {
-                    var plannedStep = GetNextPlannedStep(ref nextPlanIndex);
-                    return new ValueTask<HttpResponseMessage>(
-                        api.GetStatusAsync((int)plannedStep.StatusCode, delayMs: plannedStep.HoldSeconds * 1000, token));
-                },
-                cancellationToken);
+            await RunPlannedStepAsync(api, pipeline, plannedStep, cancellationToken);
         }
-        catch (BrokenCircuitException)
-        {
-            blockedByOpenCircuit = true;
-        }
-
-        if (blockedByOpenCircuit)
-        {
-            await PauseForVisualStateAsync(demoOptions.PolicyOptions.BreakDuration + TimeSpan.FromMilliseconds(250), cancellationToken);
-            await pipeline.ExecuteAsync(
-                token =>
-                {
-                    var plannedStep = GetNextPlannedStep(ref nextPlanIndex);
-                    return new ValueTask<HttpResponseMessage>(
-                        api.GetStatusAsync((int)plannedStep.StatusCode, delayMs: plannedStep.HoldSeconds * 1000, token));
-                },
-                cancellationToken);
-        }
-
     }
 
-    private async Task RunPlannedCallAsync(
+    private async Task RunPlannedStepAsync(
         IStatusCodeApi api,
         ResiliencePipeline<HttpResponseMessage> pipeline,
         RespondingServerPlanStep plannedStep,
         CancellationToken cancellationToken)
     {
-        await pipeline.ExecuteAsync(
-            token => new ValueTask<HttpResponseMessage>(
-                api.GetStatusAsync((int)plannedStep.StatusCode, delayMs: plannedStep.HoldSeconds * 1000, token)),
-            cancellationToken);
-    }
-
-    private static RespondingServerPlanStep GetNextPlannedStep(ref int nextPlanIndex)
-    {
-        if (nextPlanIndex >= RespondingServerPlan.Length)
+        if (plannedStep.WaitBeforeStep > TimeSpan.Zero)
         {
-            return new RespondingServerPlanStep(HttpStatusCode.OK, 0);
+            await Task.Delay(plannedStep.WaitBeforeStep, cancellationToken);
         }
 
-        var plannedStatus = RespondingServerPlan[nextPlanIndex];
-        nextPlanIndex++;
-        return plannedStatus;
+        if (plannedStep.StatusCode is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await pipeline.ExecuteAsync(
+                token => new ValueTask<HttpResponseMessage>(
+                    api.GetStatusAsync((int)plannedStep.StatusCode.Value, delayMs: 0, token)),
+                cancellationToken);
+        }
+        catch
+        {
+        }
     }
 
-    private readonly record struct RespondingServerPlanStep(HttpStatusCode StatusCode, int HoldSeconds);
+    private RespondingServerPlanStep[] CreateRespondingServerPlan() =>
+    [
+        new(StatusCode: null, WaitBeforeStep: TimeSpan.FromSeconds(5)),
+        new(HttpStatusCode.OK),
+        new((HttpStatusCode)529, WaitBeforeStep: TimeSpan.FromSeconds(6)),
+        new(HttpStatusCode.OK, WaitBeforeStep: TimeSpan.FromSeconds(2)),
+        new(
+            HttpStatusCode.OK,
+            WaitBeforeStep: demoOptions.PolicyOptions.BreakDuration + TimeSpan.FromMilliseconds(250)),
+        new(HttpStatusCode.NotFound, WaitBeforeStep: TimeSpan.FromSeconds(5))
+    ];
 
-    private static async Task PauseForVisualStateAsync(TimeSpan duration, CancellationToken cancellationToken)
-    {
-        await Task.Delay(duration, cancellationToken);
-    }
+    private readonly record struct RespondingServerPlanStep(
+        HttpStatusCode? StatusCode,
+        TimeSpan WaitBeforeStep = default);
 }

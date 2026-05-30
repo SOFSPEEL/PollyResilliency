@@ -4,7 +4,7 @@ public sealed class ApiResiliencePolicyOptions
 {
     public double CircuitFailureRatio { get; init; } = 1.0;
 
-    public int MaxRetryAttempts { get; init; } = 3;
+    public int MaxRetryAttempts { get; init; } =2;
 
     public TimeSpan RetryDelay { get; init; } = TimeSpan.FromMilliseconds(250);
 
