@@ -6,12 +6,13 @@ internal sealed record UiState(
     bool SendingHttp,
     int? ApiStatusCode,
     string? FallbackMessage,
-    IReadOnlyList<UiGraphEntry> GraphEntries,
-    IReadOnlyList<UiBackoffEntry> BackoffEntries,
-    IReadOnlyList<UiLogEntry> LogEntries);
+    IReadOnlyList<UiEvent> Events);
 
-internal sealed record UiGraphEntry(int CallNumber, int StatusCode, string Label);
-
-internal sealed record UiBackoffEntry(int CallNumber, int StatusCode, int DelayMs);
-
-internal sealed record UiLogEntry(string Timestamp, string Message);
+internal sealed record UiEvent(
+    string Type,
+    string Timestamp,
+    string? Message = null,
+    int? CallNumber = null,
+    int? StatusCode = null,
+    string? Label = null,
+    int? DelayMs = null);

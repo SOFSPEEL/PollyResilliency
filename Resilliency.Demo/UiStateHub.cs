@@ -5,7 +5,7 @@ namespace Resilliency.Demo;
 
 internal sealed class UiStateHub
 {
-    private const int MaxLogEntries = 200;
+    private const int MaxEvents = 400;
 
     private readonly ConcurrentDictionary<Guid, Channel<UiState>> _subscribers = new();
     private readonly Lock _stateSync = new();
@@ -13,9 +13,7 @@ internal sealed class UiStateHub
     private bool _isRunning;
     private int? _apiStatusCode;
     private string? _fallbackMessage;
-    private readonly List<UiGraphEntry> _graphEntries = [];
-    private readonly List<UiBackoffEntry> _backoffEntries = [];
-    private readonly List<UiLogEntry> _logEntries = [];
+    private readonly List<UiEvent> _events = [];
     private int _callCount;
     private int _lastRetryCallNumber;
     private string? _nextGraphLabel;
@@ -34,9 +32,7 @@ internal sealed class UiStateHub
         {
             _apiStatusCode = null;
             _fallbackMessage = null;
-            _graphEntries.Clear();
-            _backoffEntries.Clear();
-            _logEntries.Clear();
+            _events.Clear();
             _callCount = 0;
             _lastRetryCallNumber = 0;
             _nextGraphLabel = null;
@@ -50,9 +46,7 @@ internal sealed class UiStateHub
         {
             _apiStatusCode = null;
             _fallbackMessage = null;
-            _graphEntries.Clear();
-            _backoffEntries.Clear();
-            _logEntries.Clear();
+            _events.Clear();
             _callCount = 0;
             _lastRetryCallNumber = 0;
             _nextGraphLabel = null;
@@ -78,11 +72,7 @@ internal sealed class UiStateHub
     {
         lock (_stateSync)
         {
-            _logEntries.Add(new UiLogEntry(DateTimeOffset.Now.ToString("HH:mm:ss.fff"), message));
-            if (_logEntries.Count > MaxLogEntries)
-            {
-                _logEntries.RemoveAt(0);
-            }
+            AddEvent(new UiEvent(Type: "log", Timestamp: CreateTimestamp(), Message: message));
 
             PublishUiStateChanged();
         }
@@ -122,7 +112,12 @@ internal sealed class UiStateHub
         {
             _callCount += 1;
             var label = ResolveGraphLabel(statusCode);
-            _graphEntries.Add(new UiGraphEntry(_callCount, statusCode, label));
+            AddEvent(new UiEvent(
+                Type: "graph",
+                Timestamp: CreateTimestamp(),
+                CallNumber: _callCount,
+                StatusCode: statusCode,
+                Label: label));
             if (statusCode == 529)
             {
                 _lastRetryCallNumber = _callCount;
@@ -141,7 +136,12 @@ internal sealed class UiStateHub
                 return;
             }
 
-            _backoffEntries.Add(new UiBackoffEntry(_lastRetryCallNumber, statusCode, delayMs));
+            AddEvent(new UiEvent(
+                Type: "backoff",
+                Timestamp: CreateTimestamp(),
+                CallNumber: _lastRetryCallNumber,
+                StatusCode: statusCode,
+                DelayMs: delayMs));
             PublishUiStateChanged();
         }
     }
@@ -186,6 +186,17 @@ internal sealed class UiStateHub
         Publish(CreateUiState());
     }
 
+    private void AddEvent(UiEvent uiEvent)
+    {
+        _events.Add(uiEvent);
+        if (_events.Count > MaxEvents)
+        {
+            _events.RemoveAt(0);
+        }
+    }
+
+    private static string CreateTimestamp() => DateTimeOffset.Now.ToString("HH:mm:ss.fff");
+
     private string ResolveGraphLabel(int statusCode)
     {
         if (!string.IsNullOrWhiteSpace(_nextGraphLabel))
@@ -224,7 +235,5 @@ internal sealed class UiStateHub
             SendingHttp: _circuitState is CircuitState.Closed or CircuitState.HalfOpen,
             ApiStatusCode: _apiStatusCode,
             FallbackMessage: _fallbackMessage,
-            GraphEntries: _graphEntries.ToArray(),
-            BackoffEntries: _backoffEntries.ToArray(),
-            LogEntries: _logEntries.ToArray());
+            Events: _events.ToArray());
 }

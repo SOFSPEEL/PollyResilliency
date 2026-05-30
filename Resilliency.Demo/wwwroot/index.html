@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Polly Circuit Breaker Demo</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="/styles.css?v=42">
+    <link rel="stylesheet" href="/styles.css?v=45">
 </head>
 <body class="closed">
 <header>
@@ -40,15 +40,9 @@
                             <div class="breaker-label"></div>
                         </div>
                         <div class="call-graph" aria-label="Backoff delay by call count">
-                            <div class="graph-title">Backoff Delay Over Time</div>
-                            <div class="graph-subtitle">X = calls made, height = retry wait; green/red bars show HTTP
-                                results
-                            </div>
                             <div class="backoff-time-chart">
                                 <div class="backoff-y-axis"><span>9s</span><span>3s</span><span>0s</span></div>
-                                <div class="backoff-time-plot" id="backoffBars">
-                                    <div class="backoff-empty">Bars appear as calls and retry waits happen</div>
-                                </div>
+                                <div class="backoff-time-plot" id="backoffBars"></div>
                             </div>
                             <div class="timeline-axis" id="graphAxis"></div>
                         </div>
@@ -204,34 +198,55 @@
             setApiStatus(null);
         }
 
-        renderGraphState(data.GraphEntries ?? data.graphEntries ?? [], data.BackoffEntries ?? data.backoffEntries ?? []);
-        renderRunLog(data.LogEntries ?? data.logEntries ?? []);
+        const events = data.Events ?? data.events ?? [];
+        const graphEntries = events.filter(isGraphEvent);
+        const backoffEntries = events.filter(isBackoffEvent);
+        const logEntries = events.filter(isLogEvent);
 
-        if ((data.GraphEntries?.length ?? 0) > previousGraphCount) {
-            const latest = data.GraphEntries[data.GraphEntries.length - 1];
-            setFlow('calling', `Calling API: HTTP ${latest.StatusCode}`);
+        renderGraphState(graphEntries, backoffEntries);
+        renderRunLog(logEntries);
+
+        if (graphEntries.length > previousGraphCount) {
+            const latest = graphEntries[graphEntries.length - 1];
+            setFlow('calling', `Calling API: HTTP ${latest.StatusCode ?? latest.statusCode}`);
             flashHttpRequest('HTTP request reached STATUS API');
         }
 
-        if ((data.BackoffEntries?.length ?? 0) > previousBackoffCount) {
+        if (backoffEntries.length > previousBackoffCount) {
             setFlow('backoff', 'Backing off before retry');
         }
 
-        previousGraphCount = data.GraphEntries?.length ?? 0;
-        previousBackoffCount = data.BackoffEntries?.length ?? 0;
+        previousGraphCount = graphEntries.length;
+        previousBackoffCount = backoffEntries.length;
 
         if (data.FallbackMessage) {
             setFallback();
         }
     }
 
+    function getEventType(entry) {
+        return entry.Type ?? entry.type ?? '';
+    }
+
+    function isGraphEvent(entry) {
+        return getEventType(entry) === 'graph';
+    }
+
+    function isBackoffEvent(entry) {
+        return getEventType(entry) === 'backoff';
+    }
+
+    function isLogEvent(entry) {
+        return getEventType(entry) === 'log';
+    }
+
     function renderGraphState(graphEntries, backoffEntries) {
         resetBackoffGraph();
 
         graphEntries.forEach(entry => {
-            const callNumber = Number(entry.CallNumber);
-            const statusCode = Number(entry.StatusCode);
-            const label = entry.Label ?? `HTTP ${statusCode}`;
+            const callNumber = Number(entry.CallNumber ?? entry.callNumber);
+            const statusCode = Number(entry.StatusCode ?? entry.statusCode);
+            const label = entry.Label ?? entry.label ?? `HTTP ${statusCode}`;
             if (!Number.isFinite(callNumber) || !Number.isFinite(statusCode)) return;
 
             callCount = Math.max(callCount, callNumber);
@@ -245,9 +260,9 @@
         });
 
         backoffEntries.forEach(entry => {
-            const callNumber = Number(entry.CallNumber);
-            const statusCode = Number(entry.StatusCode);
-            const delayMs = Number(entry.DelayMs);
+            const callNumber = Number(entry.CallNumber ?? entry.callNumber);
+            const statusCode = Number(entry.StatusCode ?? entry.statusCode);
+            const delayMs = Number(entry.DelayMs ?? entry.delayMs);
             if (!Number.isFinite(callNumber) || !Number.isFinite(statusCode) || !Number.isFinite(delayMs)) return;
             addBackoffBarAtCall(String(delayMs), String(statusCode), callNumber);
         });
@@ -364,12 +379,6 @@
         lastRetryCallNumber = 0;
         backoffBars.querySelectorAll('.backoff-bar, .status-bar').forEach(bar => bar.remove());
         graphAxis.replaceChildren();
-        if (!backoffBars.querySelector('.backoff-empty')) {
-            const empty = document.createElement('div');
-            empty.className = 'backoff-empty';
-            empty.textContent = 'Bars appear as calls and retry waits happen';
-            backoffBars.appendChild(empty);
-        }
     }
 </script>
 </body>

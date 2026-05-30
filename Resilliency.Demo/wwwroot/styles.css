@@ -248,8 +248,8 @@ section {
   display: grid;
   grid-template-columns: 2.25rem minmax(0, 1fr);
   gap: .55rem;
-  height: 10.6rem;
-  margin-top: .5rem;
+  height: 12.35rem;
+  margin-top: 0;
 }
 
 .backoff-y-axis {
