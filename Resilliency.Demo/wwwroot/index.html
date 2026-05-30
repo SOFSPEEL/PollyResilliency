@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Polly Circuit Breaker Demo</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="/styles.css?v=46">
+    <link rel="stylesheet" href="/styles.css?v=49">
 </head>
 <body class="closed">
 <header>
@@ -30,7 +30,6 @@
                     </div>
                     <div class="col-12 col-md-8">
                         <div class="wire">
-                        <div class="flow-status" id="flowStatus">Idle</div>
                         <div class="breaker">
                             <div class="switch-line switch-left-wire"></div>
                             <div class="switch-line switch-right-wire"></div>
@@ -39,6 +38,7 @@
                             <div class="switch-lever"></div>
                             <div class="breaker-label"></div>
                         </div>
+                        <div class="flow-status client-output idle" id="flowStatus">What client would see</div>
                         <div class="call-graph" aria-label="Backoff delay by call count">
                             <div class="backoff-time-chart">
                                 <div class="backoff-y-axis"><span>16s</span><span>4s</span><span>0s</span></div>
@@ -92,11 +92,16 @@
     let previousBackoffCount = 0;
 
     function setFlow(mode, text) {
+        flowStatus.className = `flow-status client-output ${mode}`;
         flowStatus.textContent = text;
     }
 
+    function setClientWaiting() {
+        flowStatus.className = 'flow-status client-output waiting';
+        flowStatus.innerHTML = '<span class="client-spinner" aria-hidden="true"></span><span>Spinner waiting for data</span>';
+    }
+
     function flashHttpRequest(text) {
-        flowStatus.textContent = text;
         document.body.classList.add('http-flash');
         clearTimeout(httpFlashTimer);
         httpFlashTimer = setTimeout(() => document.body.classList.remove('http-flash'), httpFlashDurationMs);
@@ -166,14 +171,6 @@
         const normalized = normalizeCircuitState(state);
         if (!normalized) return;
         setState(normalized);
-
-        if (normalized === 'Closed') {
-            setFlow('idle', canSendHttp === false ? 'Circuit closed (HTTP blocked)' : 'Circuit closed (HTTP allowed)');
-        } else if (normalized === 'Open') {
-            setFlow('blocked', 'Circuit open');
-        } else if (normalized === 'HalfOpen') {
-            setFlow('probe', canSendHttp === false ? 'Half-open (HTTP blocked)' : 'Half-open probe (HTTP allowed)');
-        }
     }
 
     function normalizeCircuitState(state) {
@@ -208,12 +205,13 @@
 
         if (graphEntries.length > previousGraphCount) {
             const latest = graphEntries[graphEntries.length - 1];
-            setFlow('calling', `Calling API: HTTP ${latest.StatusCode ?? latest.statusCode}`);
+            const latestStatusCode = Number(latest.StatusCode ?? latest.statusCode);
+            setClientResult(latestStatusCode);
             flashHttpRequest('HTTP request reached STATUS API');
         }
 
         if (backoffEntries.length > previousBackoffCount) {
-            setFlow('backoff', 'Backing off before retry');
+            setClientWaiting();
         }
 
         previousGraphCount = graphEntries.length;
@@ -283,7 +281,28 @@
     function setFallback() {
         document.body.classList.remove('closed', 'open', 'halfopen');
         document.body.classList.add('fallback');
-        setFlow('fallback', 'Fallback response returned locally');
+        setFlow('apology', 'Apology: We are working to bring our system back up ASAP');
+    }
+
+    function setClientResult(statusCode) {
+        if (statusCode === 200) {
+            setFlow('success', 'All good');
+            return;
+        }
+
+        if (statusCode === 529) {
+            setClientWaiting();
+            return;
+        }
+
+        if (statusCode === 404) {
+            setFlow('apology', 'Apology: We are working to bring our system back up ASAP');
+            return;
+        }
+
+        if (Number.isFinite(statusCode) && statusCode >= 400) {
+            setFlow('apology', 'Apology: We are working to bring our system back up ASAP');
+        }
     }
 
     function getHttpColor(statusCode) {
@@ -369,6 +388,7 @@
     function resetScenarioView() {
         clearTimeout(httpFlashTimer);
         document.body.classList.remove('http-flash');
+        setFlow('idle', 'What client would see');
         resetBackoffGraph();
         renderRunLog([]);
     }
