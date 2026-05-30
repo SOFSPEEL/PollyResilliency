@@ -120,14 +120,14 @@ internal sealed class DemoScenarioRunner(
 
     private RespondingServerPlanStep[] CreateRespondingServerPlan() =>
     [
-        new(StatusCode: null, WaitBeforeStep: TimeSpan.FromSeconds(5)),
+        new(StatusCode: null, WaitBeforeStep: TimeSpan.FromSeconds(10)),
         new(HttpStatusCode.OK),
-        new((HttpStatusCode)529, WaitBeforeStep: TimeSpan.FromSeconds(6)),
-        new(HttpStatusCode.OK, WaitBeforeStep: TimeSpan.FromSeconds(2)),
+        new((HttpStatusCode)529, WaitBeforeStep: TimeSpan.FromSeconds(12)),
+        new(HttpStatusCode.OK, WaitBeforeStep: TimeSpan.FromSeconds(8)),
         new(
             HttpStatusCode.OK,
-            WaitBeforeStep: demoOptions.PolicyOptions.BreakDuration + TimeSpan.FromMilliseconds(250)),
-        new(HttpStatusCode.NotFound, WaitBeforeStep: TimeSpan.FromSeconds(5))
+            WaitBeforeStep: demoOptions.PolicyOptions.BreakDuration + TimeSpan.FromSeconds(12)),
+        new(HttpStatusCode.NotFound, WaitBeforeStep: TimeSpan.FromSeconds(11))
     ];
 
     private readonly record struct RespondingServerPlanStep(

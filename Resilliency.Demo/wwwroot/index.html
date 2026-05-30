@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Polly Circuit Breaker Demo</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="/styles.css?v=38">
+    <link rel="stylesheet" href="/styles.css?v=42">
 </head>
 <body class="closed">
 <header>
@@ -90,6 +90,7 @@
     const graphAxis = document.getElementById('graphAxis');
     const runLog = document.getElementById('runLog');
     const totalCallSlots = 10;
+    const httpFlashDurationMs = 3200;
     let httpFlashTimer;
     let callCount = 0;
     let lastRetryCallNumber = 0;
@@ -104,7 +105,7 @@
         flowStatus.textContent = text;
         document.body.classList.add('http-flash');
         clearTimeout(httpFlashTimer);
-        httpFlashTimer = setTimeout(() => document.body.classList.remove('http-flash'), 1600);
+        httpFlashTimer = setTimeout(() => document.body.classList.remove('http-flash'), httpFlashDurationMs);
     }
 
     function addGraphBar(status, label) {
@@ -256,7 +257,6 @@
         const css = next.toLowerCase();
         document.body.classList.remove('closed', 'open', 'halfopen', 'fallback');
         document.body.classList.add(css === 'halfopen' ? 'halfopen' : css);
-        document.body.classList.remove('http-flash');
     }
 
     function setRunStatus(isRunning) {
@@ -268,7 +268,6 @@
     function setFallback() {
         document.body.classList.remove('closed', 'open', 'halfopen');
         document.body.classList.add('fallback');
-        document.body.classList.remove('http-flash');
         setFlow('fallback', 'Fallback response returned locally');
     }
 
@@ -327,19 +326,34 @@
         runLog.scrollTop = runLog.scrollHeight;
     }
 
-    const source = new EventSource('/events');
-    source.onmessage = event => {
-        const data = JSON.parse(event.data);
-        applyUiStateChanged(data);
-    };
+    let source;
 
-    document.getElementById('run').addEventListener('click', async () => {
+    window.addEventListener('load', clearViewAfterPageLoad);
+    document.getElementById('run').addEventListener('click', restartScenario);
+
+    async function clearViewAfterPageLoad() {
+        resetScenarioView();
+        await fetch('/clear', {method: 'POST'});
+        connectEventStream();
+    }
+
+    function connectEventStream() {
+        source = new EventSource('/events');
+        source.onmessage = event => {
+            const data = JSON.parse(event.data);
+            applyUiStateChanged(data);
+        };
+    }
+
+    async function restartScenario() {
         resetScenarioView();
         setRunStatus(true);
         await fetch('/restart', {method: 'POST'});
-    });
+    }
 
     function resetScenarioView() {
+        clearTimeout(httpFlashTimer);
+        document.body.classList.remove('http-flash');
         resetBackoffGraph();
         renderRunLog([]);
     }

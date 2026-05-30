@@ -9,6 +9,7 @@ internal static class DemoRouteExtensions
         app.MapGet("/events", StreamEventsAsync);
         app.MapPost("/run", RunScenarioAsync);
         app.MapPost("/restart", RestartScenarioAsync);
+        app.MapPost("/clear", ClearVisibleHistory);
         app.MapGet("/status/{statusCode:int}", StatusCodeAsync);
     }
 
@@ -51,6 +52,12 @@ internal static class DemoRouteExtensions
         eventHub.SetCircuitState(CircuitState.Closed);
         await runner.RestartAsync(cancellationToken);
         return Results.Accepted(value: new { status = "restarted" });
+    }
+
+    private static IResult ClearVisibleHistory(UiStateHub eventHub)
+    {
+        eventHub.ClearVisibleHistory();
+        return Results.NoContent();
     }
 
     private static async Task<IResult> StatusCodeAsync(

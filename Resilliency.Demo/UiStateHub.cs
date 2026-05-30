@@ -44,6 +44,22 @@ internal sealed class UiStateHub
         }
     }
 
+    public void ClearVisibleHistory()
+    {
+        lock (_stateSync)
+        {
+            _apiStatusCode = null;
+            _fallbackMessage = null;
+            _graphEntries.Clear();
+            _backoffEntries.Clear();
+            _logEntries.Clear();
+            _callCount = 0;
+            _lastRetryCallNumber = 0;
+            _nextGraphLabel = null;
+            PublishUiStateChanged();
+        }
+    }
+
     public void SetRunning(bool isRunning)
     {
         lock (_stateSync)
@@ -157,7 +173,7 @@ internal sealed class UiStateHub
         }
     }
 
-    public void Publish(UiState uiState)
+    private void Publish(UiState uiState)
     {
         foreach (var subscriber in _subscribers.Values)
         {
