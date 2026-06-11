@@ -67,7 +67,7 @@ internal static class DemoRouteExtensions
         HttpContext context)
     {
         var line =
-            $"{DateTimeOffset.Now:HH:mm:ss.fff} | RESPONDING SERVER: received GET {context.Request.Path}{context.Request.QueryString}; returning HTTP {statusCode} after {delayMs} ms.";
+            $"{DateTimeOffset.Now:HH:mm:ss.fff} | MOCK DOWNSTREAM SERVER: received GET {context.Request.Path}{context.Request.QueryString}; returning HTTP {statusCode} after {delayMs} ms.";
         Console.WriteLine(line);
         eventHub.AddLog($"SERVER: HTTP {statusCode}");
         eventHub.SetApiStatus(statusCode);

@@ -84,7 +84,7 @@ internal sealed class DemoScenarioRunner(
         events.ResetScenario();
         events.SetCircuitState(CircuitState.Closed);
 
-        foreach (var plannedStep in CreateRespondingServerPlan())
+        foreach (var plannedStep in CreateMockDownstreamServerPlan())
         {
             await RunPlannedStepAsync(api, pipeline, plannedStep, cancellationToken);
         }
@@ -93,7 +93,7 @@ internal sealed class DemoScenarioRunner(
     private async Task RunPlannedStepAsync(
         IStatusCodeApi api,
         ResiliencePipeline<HttpResponseMessage> pipeline,
-        RespondingServerPlanStep plannedStep,
+        MockDownstreamServerPlanStep plannedStep,
         CancellationToken cancellationToken)
     {
         if (plannedStep.WaitBeforeStep > TimeSpan.Zero)
@@ -118,7 +118,7 @@ internal sealed class DemoScenarioRunner(
         }
     }
 
-    private RespondingServerPlanStep[] CreateRespondingServerPlan() =>
+    private MockDownstreamServerPlanStep[] CreateMockDownstreamServerPlan() =>
     [
         new(StatusCode: null, WaitBeforeStep: TimeSpan.FromSeconds(10)),
         new(HttpStatusCode.OK),
@@ -130,7 +130,7 @@ internal sealed class DemoScenarioRunner(
         new(HttpStatusCode.NotFound, WaitBeforeStep: TimeSpan.FromSeconds(11))
     ];
 
-    private readonly record struct RespondingServerPlanStep(
+    private readonly record struct MockDownstreamServerPlanStep(
         HttpStatusCode? StatusCode,
         TimeSpan WaitBeforeStep = default);
 }
