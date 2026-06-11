@@ -109,33 +109,24 @@ public static class ApiResiliencePolicies
             BreakDuration = options.BreakDuration,
             ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
                 .HandleResult(response => (int)response.StatusCode == 529),
-            OnOpened = _ =>
-            {
-                return OnCircuitStateChangedAsync(
-                    CircuitBreakerVisualState.Open,
-                    circuitStateChanged,
-                    resilienceEventPublisher,
-                    log,
-                    CancellationToken.None);
-            },
-            OnHalfOpened = _ =>
-            {
-                return OnCircuitStateChangedAsync(
-                    CircuitBreakerVisualState.HalfOpen,
-                    circuitStateChanged,
-                    resilienceEventPublisher,
-                    log,
-                    CancellationToken.None);
-            },
-            OnClosed = _ =>
-            {
-                return OnCircuitStateChangedAsync(
-                    CircuitBreakerVisualState.Closed,
-                    circuitStateChanged,
-                    resilienceEventPublisher,
-                    log,
-                    CancellationToken.None);
-            }
+            OnOpened = _ => OnCircuitStateChangedAsync(
+                CircuitBreakerVisualState.Open,
+                circuitStateChanged,
+                resilienceEventPublisher,
+                log,
+                CancellationToken.None),
+            OnHalfOpened = _ => OnCircuitStateChangedAsync(
+                CircuitBreakerVisualState.HalfOpen,
+                circuitStateChanged,
+                resilienceEventPublisher,
+                log,
+                CancellationToken.None),
+            OnClosed = _ => OnCircuitStateChangedAsync(
+                CircuitBreakerVisualState.Closed,
+                circuitStateChanged,
+                resilienceEventPublisher,
+                log,
+                CancellationToken.None)
         };
 
     private static ValueTask OnCircuitStateChangedAsync(
